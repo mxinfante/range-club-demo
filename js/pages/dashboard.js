@@ -4,16 +4,18 @@
   var n = function (x) { return Math.round(x).toLocaleString("en-US"); };
 
   function feed() {
-    var ev = App.ts().events.filter(function (e) { return e.type === "renewal" || e.type === "checkin" || e.type === "checkout" || e.type === "signup" || e.type === "waiver"; });
+    var ev = App.ts().events.filter(function (e) { return e.type === "renewal" || e.type === "checkin" || e.type === "checkout" || e.type === "signup" || e.type === "waiver" || e.type === "payPending" || e.type === "payment"; });
     if (!ev.length) return "";
     var all = App.ts().events, nR = all.filter(function (e) { return e.type === "renewal"; }), nS = all.filter(function (e) { return e.type === "signup"; }).length, nC = all.filter(function (e) { return e.type === "checkin"; }).length;
-    var amt = nR.reduce(function (a, e) { return a + e.amount; }, 0) + all.filter(function (e) { return e.type === "signup"; }).reduce(function (a, e) { return a + e.amount; }, 0);
+    var amt = nR.reduce(function (a, e) { return a + e.amount; }, 0) + all.filter(function (e) { return (e.type === "signup" && e.method !== "desk") || e.type === "payment"; }).reduce(function (a, e) { return a + e.amount; }, 0); // pay-at-desk counts when collected
     var sum = '<span class="chip">' + ic("renew", "i-xs") + nR.length + tx(" renovación(es)", " renewal(s)") + '</span><span class="chip">' + ic("user-plus", "i-xs") + nS + tx(" inscripción(es)", " sign-up(s)") + '</span><span class="chip">' + ic("login", "i-xs") + nC + tx(" entrada(s)", " check-in(s)") + '</span><span class="chip">' + ic("dollar", "i-xs") + App.money(amt, false) + tx(" cobrado", " collected") + "</span>";
     var rows = ev.slice().reverse().slice(0, 4).map(function (e) {
-      var what = e.type === "renewal" ? ic("renew", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("renovó", "renewed") + " · " + money(e.amount, false) + " · " + ({ link: tx("enlace", "link"), desk: tx("recepción", "desk"), portal: "portal" }[e.src] || e.src) + " · " + ({ paypal: "PayPal", card: tx("tarjeta", "card"), ath: "ATH Móvil" }[e.method] || "") + "</span>"
+      var what = e.type === "renewal" ? ic("renew", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("renovó", "renewed") + " · " + money(e.amount, false) + " · " + ({ link: tx("enlace", "link"), desk: tx("recepción", "desk"), portal: "portal" }[e.src] || e.src) + " · " + App.payShort(e.method) + (e.collected ? tx(" (pago en recepción)", " (paid at desk)") : "") + "</span>"
+        : e.type === "payPending" ? ic("hourglass", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + (e.kind === "signup" ? tx("se inscribió", "signed up") : tx("reservó su renovación", "reserved a renewal")) + " · " + tx("pago pendiente en recepción", "payment pending at desk") + " · " + money(e.amount, false) + "</span>"
+        : e.type === "payment" ? ic("dollar", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("pagó su inscripción en recepción", "paid their sign-up at the desk") + " · " + money(e.amount, false) + " · " + App.payShort(e.method) + "</span>"
         : e.type === "checkin" ? ic("login", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("registró entrada", "checked in") + (e.where === "kiosk" ? tx(" (quiosco)", " (kiosk)") : "") + (e.guests && e.guests.length ? " +" + e.guests.length + tx(" invitado(s)", " guest(s)") : "") + "</span>"
         : e.type === "checkout" ? ic("log-out", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + (e.forced ? tx("salida forzada por ", "forced check-out by ") + App.esc(e.by) : tx("registró salida", "checked out") + (e.where === "kiosk" ? tx(" (quiosco)", " (kiosk)") : "")) + " · " + App.dur(e.dur) + "</span>"
-        : e.type === "signup" ? ic("user-plus", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("se inscribió", "signed up") + " · " + money(e.amount, false) + "</span>"
+        : e.type === "signup" ? ic("user-plus", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("se inscribió", "signed up") + " · " + money(e.amount, false) + " · " + App.payShort(e.method) + "</span>"
         : ic("waiver", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("firmó el relevo v", "signed waiver v") + App.ten().waiver.v + "</span>";
       return '<li><span class="feed-t">' + App.time(e.at) + "</span>" + what + "</li>";
     }).join("");
@@ -58,6 +60,8 @@
     // sources + reminder steps
     var src = M.src, tot = src.link + src.portal + src.desk + src.auto;
     var pct = function (v) { return Math.round(v / tot * 100) + "%"; };
+    var meth = M.meth, mtot = meth.card + meth.ath + meth.desk;
+    var methCard = function (k, icon, l) { return '<div class="src"><div class="l">' + ic(icon) + "<span>" + l + '</span></div><div class="v" data-meth="' + k + '">' + meth[k] + "<small>" + Math.round(meth[k] / mtot * 100) + "%</small></div></div>"; };
     var srcCard = function (k, icon, l) { return '<div class="src' + (k === "link" ? " is-link" : "") + '"><div class="l">' + ic(icon) + "<span>" + l + '</span></div><div class="v" data-src="' + k + '">' + src[k] + "<small>" + pct(src[k]) + "</small></div></div>"; };
     var order = ["d30", "d14", "d7", "d1", "d0", "g3"], mx = 0;
     order.forEach(function (k) { mx = Math.max(mx, M.steps[k][0] + M.steps[k][1]); });
@@ -68,6 +72,8 @@
     }).join("");
     var sources = '<div class="card"><div class="card-header"><div><h2>' + tx("Renovaciones por origen", "Renewals by source") + '</h2><div class="small subtle">' + tx("Últimos 30 días · y qué paso de recordatorio generó las renovaciones por enlace", "Last 30 days · and which reminder step drove link renewals") + '</div></div><div class="legend"><span><i class="c-email"></i>Email</span><span><i class="c-sms"></i>' + tx("Texto", "Text") + "</span></div></div>" +
       '<div class="card-body"><div class="sources">' + srcCard("link", "send", tx("Enlace", "Reminder link")) + srcCard("portal", "user", "Portal") + srcCard("desk", "desk", tx("Recepción", "Desk")) + srcCard("auto", "renew", tx("Auto-renovación", "Auto-renew")) + "</div>" +
+      '<div class="sub-h"><h3>' + tx("Por método de pago", "By payment method") + '</h3><span class="xs subtle" data-meth-total="' + mtot + '">' + tx("Mismas " + mtot + " renovaciones · la auto-renovación cobra a tarjeta", "Same " + mtot + " renewals · auto-renew charges a card") + "</span></div>" +
+      '<div class="sources meth">' + methCard("card", "card", tx("Tarjeta", "Card")) + methCard("ath", "phone", "ATH Móvil") + methCard("desk", "desk", tx("Recepción (efectivo/cheque)", "Front desk (cash/check)")) + "</div>" +
       '<div class="sub-h"><h3>' + tx("Renovaciones por enlace según el paso de recordatorio", "Link renewals by reminder step") + '</h3><span class="xs subtle">' + tx("Atribuidas al recordatorio cuyo enlace se usó", "Credited to the reminder whose link was used") + '</span></div><div class="bars">' + bars + "</div></div></div>";
 
     // renewal rate line

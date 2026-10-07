@@ -476,7 +476,6 @@ a:hover { text-decoration: underline; }
 .pay-opt { border: 1.5px solid var(--border); border-radius: 12px; background: #fff; height: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; color: var(--n-700); position: relative; }
 .pay-opt.is-selected { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; background: var(--primary-soft); color: var(--n-900); }
 .pay-opt .wm { font-size: 15px; font-weight: 800; letter-spacing: -0.02em; line-height: 18px; }
-.wm-paypal { color: #003087; font-style: italic; } .wm-paypal b { color: #0070E0; font-weight: 800; }
 .wm-ath { color: #E35205; }
 .pay-opt .sel { position: absolute; top: 6px; right: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--primary); color: #fff; display: grid; place-items: center; }
 .pay-opt .sel .i { width: 11px; height: 11px; stroke-width: 3.5; }

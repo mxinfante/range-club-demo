@@ -10,11 +10,11 @@
   }
   function kindLabel(msg) {
     if (msg.kind === "reminder" || msg.kind === "lic") return App.txa(App.STEPN[msg.step]);
-    return { auto7: tx("Aviso de cobro · 7 días", "Charge notice · 7 days"), link: tx("Enlace desde recepción", "Link from front desk"), welcome: tx("Bienvenida", "Welcome"), receipt: tx("Recibo", "Receipt") }[msg.kind] || msg.kind;
+    return { auto7: tx("Aviso de cobro · 7 días", "Charge notice · 7 days"), link: tx("Enlace desde recepción", "Link from front desk"), welcome: tx("Bienvenida", "Welcome"), receipt: tx("Recibo", "Receipt"), payPending: tx("Pago pendiente en recepción", "Payment pending at desk") }[msg.kind] || msg.kind;
   }
   function hrefFor(msg, ch) {
     if (msg.kind === "reminder" || msg.kind === "link") return "renew.html?m=" + msg.mid + "&src=link" + (msg.step ? "&step=" + msg.step : "") + "&ch=" + ch;
-    if (msg.kind === "auto7") return "portal.html?m=" + msg.mid;
+    if (msg.kind === "auto7" || msg.kind === "payPending") return "portal.html?m=" + msg.mid;
     if (msg.kind === "lic") return "portal.html?m=" + msg.mid + "#licencia";
     return "card.html?m=" + msg.mid;
   }
@@ -55,7 +55,7 @@
       return '<button type="button" class="ob-item' + (on ? " is-on" : "") + '" data-act="sel" data-v="' + it.key + '" aria-pressed="' + on + '"><div class="avatar avatar-sm ' + (m.av || "av-1") + '">' + App.ini(m.name) + '</div><div class="grow" style="min-width:0"><div class="row between" style="gap:6px"><strong class="truncate">' + App.esc(m.name) + '</strong><span class="ob-ch">' + chOf(it.msg).map(function (c) { return ic(CH_IC[c] || "mail", "i-xs"); }).join("") + '</span></div><div class="xs subtle truncate">' + (it.extra ? '<span class="ob-new">' + tx("Nuevo", "New") + "</span> " : "") + kindLabel(it.msg) + (m.pref === "en" ? " · EN" : "") + "</div></div>" + (renewedSince(it.msg) ? ic("check-circle", "i-sm ob-ok") : "") + "</button>";
     }).join("");
     var skips = ts.outbox.run ? ts.outbox.run.msgs.filter(function (m) { return m.kind === "skip"; }) : [];
-    var skipHtml = skips.length ? '<div class="ob-skips"><div class="xs subtle" style="font-weight:650;text-transform:uppercase;letter-spacing:.06em">' + tx("Omitidos", "Skipped") + "</div>" + skips.map(function (s) { var m = App.member(s.mid) || {}; return '<div class="small">' + App.esc(m.name) + ' · <span class="subtle">' + App.txa(App.STEPN[s.step]) + " · " + (s.filed ? tx("renovación radicada · en pausa", "renewal filed · paused") : tx("tiene auto-renovación", "on auto-renew")) + "</span></div>"; }).join("") + "</div>" : "";
+    var skipHtml = skips.length ? '<div class="ob-skips"><div class="xs subtle" style="font-weight:650;text-transform:uppercase;letter-spacing:.06em">' + tx("Omitidos", "Skipped") + "</div>" + skips.map(function (s) { var m = App.member(s.mid) || {}; return '<div class="small">' + App.esc(m.name) + ' · <span class="subtle">' + App.txa(App.STEPN[s.step]) + " · " + (s.filed ? tx("renovación radicada · en pausa", "renewal filed · paused") : s.pend ? tx("pago pendiente en recepción", "payment pending at desk") : tx("tiene auto-renovación", "on auto-renew")) + "</span></div>"; }).join("") + "</div>" : "";
     return App.staffShell("outbox", head + '<div class="ob-grid"><div class="card ob-list"><div class="card-header"><h2>' + its.length + tx(" mensajes", " messages") + '</h2><span class="xs subtle">' + App.fd(App.TODAY) + "</span></div>" + list + skipHtml + "</div>" + preview(cur) + "</div>");
   }
 

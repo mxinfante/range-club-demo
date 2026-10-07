@@ -49,7 +49,8 @@
   }
   function vDesk() {
     var list = App.members(), m = App.member(vm.id, list), E = App.evaluate(m, list);
-    var reason = E.st === "lapsed" ? tx("Tu membresía está vencida. Puedes renovarla en recepción en un minuto o con el enlace que te enviamos por texto.", "Your membership has lapsed. You can renew it at the front desk in a minute or with the link we texted you.")
+    var reason = !E.lic.blocked && E.B.some(function (b) { return b.pay; }) ? tx("Tienes un pago pendiente en recepción (" + App.money(App.primary(m, list).payPending.amount) + "). Paga en efectivo o con cheque y el personal completa tu entrada.", "You have a payment pending at the front desk (" + App.money(App.primary(m, list).payPending.amount) + "). Pay in cash or by check and staff will finish your check-in.")
+      : E.st === "lapsed" ? tx("Tu membresía está vencida. Puedes renovarla en recepción en un minuto o con el enlace que te enviamos por texto.", "Your membership has lapsed. You can renew it at the front desk in a minute or with the link we texted you.")
       : E.st === "pending" ? tx("Tu inscripción está pendiente de pago.", "Your sign-up is pending payment.")
       : E.lic.blocked ? (E.lic.band === "expired" ? tx("Tu licencia de armas venció el " + App.fd(E.lic.exp, "es") + ". Sin licencia vigente no puedes tirar. Si ya la renovaste, muestra el carnet nuevo en recepción.", "Your gun license expired " + App.fd(E.lic.exp, "en") + ". Without a valid license you can't shoot. If you've renewed it, show the new card at the front desk.") : tx("Tu licencia de armas no está vigente (" + (E.lic.band === "suspended" ? "suspendida" : "revocada") + "). No puedes tirar hoy.", "Your gun license isn't valid (" + E.lic.band + "). You can't shoot today."))
       : E.B.some(function (b) { return b.act === "fixOrient"; }) ? tx("Necesitas completar la orientación de seguridad con el personal.", "You need to complete the safety orientation with staff.")

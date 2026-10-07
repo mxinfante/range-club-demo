@@ -68,12 +68,6 @@ body.has-modal { overflow: hidden; }
 .proc { padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
 .spin { width: 44px; height: 44px; border-radius: 50%; border: 4px solid var(--n-100); border-top-color: var(--primary); animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.pp-sheet { border-radius: 18px; overflow: hidden; }
-.pp-top { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: #F5F7FA; border-bottom: 1px solid var(--border); }
-.pp-body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 10px; }
-.pp-amt { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; margin: 4px 0 6px; }
-.pp-btn { background: #FFC439; color: #111; border: 0; margin-top: 8px; }
-.pp-btn:hover { background: #F2B52E; }
 
 /* ---------------- shared demo pieces */
 .demo-btn { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 12px; border: 1.5px dashed var(--rc-500); background: var(--rc-50); color: var(--rc-800); text-align: left; font: inherit; cursor: pointer; }
@@ -521,3 +515,13 @@ body[data-page="kiosk"] { background: var(--tenant-800); }
 .g-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .os-g { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 2px 0; }
 .os-g .badge { font-size: 11px; padding: 1px 6px; }
+
+/* ---------- payment options: card / ATH Móvil / pay at desk (members) · card / ATH / cash / check (staff) — no brand logos ---------- */
+.pay-opt > span:last-child { text-align: center; line-height: 16px; font-size: 13px; font-weight: 600; padding: 0 4px; }
+.pay-opt .po-sub { display: block; font-size: 11px; font-weight: 500; color: var(--n-500); line-height: 13px; }
+.pay-opts .pay-opt { height: auto; min-height: 64px; padding: 8px 4px; gap: 3px; }
+.pay-opts.is-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 520px) { .pay-opts.is-4 { grid-template-columns: repeat(2, 1fr); } }
+.sources.meth { margin-top: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sources.meth .src .l span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .sources.meth { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

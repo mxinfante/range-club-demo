@@ -9,7 +9,7 @@
   function sample() { return { name: DS.name, dob: DS.dob, phone: DS.phone, email: DS.email, town: DS.town, zip: DS.zip, emer: DS.emer, licNo: DS.licNo, licExp: DS.licExp, pref: App.L() }; }
   vm.f = sample();
   vm.hh = []; vm.add = { name: DS.adult.name, dob: DS.adult.dob }; vm.err = {}; vm.wl = App.L(); vm.agree = false; vm.sigName = DS.name; vm.sigTouched = false; vm.sig = null; vm.read = 0;
-  vm.emailOk = true; vm.sms = false; vm.method = "card"; vm.autorenew = false;
+  vm.emailOk = true; vm.sms = false; vm.method = "card"; vm.autorenew = false; vm.signup = true;
   var TOWNS = ["Guayama", "Salinas", "Arroyo", "Patillas", "Cayey", "Santa Isabel", "Coamo", "Aibonito", "Ponce", "Juana Díaz"];
   var VIEWS = ["plan", "details", "waiver", "consent", "pay"];
 
@@ -142,8 +142,8 @@
       '<div class="m-card m-card-pad" style="padding-top:8px;padding-bottom:8px"><div class="kv"><span class="k">' + tx("Plan", "Plan") + '</span><span class="v">' + App.tierName(vm.tier) + '</span></div><div class="kv"><span class="k">' + tx("Hogar", "Household") + '</span><span class="v">' + (1 + vm.hh.length) + ((1 + vm.hh.length) === 1 ? tx(" persona", " person") : tx(" personas", " people")) + '</span></div><div class="kv"><span class="k">' + tx("Primer período", "First period") + '</span><span class="v">' + App.fd(App.TODAY) + " – " + App.fd(exp) + '</span></div><div class="kv"><span class="k" style="font-weight:700;color:var(--n-900)">Total</span><span class="v" style="font-size:17px">' + App.money(tr.price) + "</span></div></div>" +
       '<div class="m-section-title">' + tx("Método de pago", "Payment method") + '</div><div class="stack-3">' + App.payPicker(vm, { name: vm.f.name, email: vm.f.email, phone: vm.f.phone }) + "</div>" +
       '<div class="callout info">' + ic("hourglass") + "<span>" + tx("Tu membresía queda <strong>Pendiente</strong> hasta completar el pago. Luego tu tarjeta digital está lista al instante.", "Your membership stays <strong>Pending</strong> until payment is complete. Then your digital card is ready right away.") + "</span></div>" +
-      '<div class="stack-2"><button type="button" class="btn btn-tenant btn-xl btn-block" data-act="pay">' + (vm.method === "ath" ? '<span class="wm wm-ath" style="color:#fff">ATH</span>' + tx("Pagar con ATH Móvil · ", "Pay with ATH Móvil · ") : ic("lock", "i-sm") + tx("Pagar e inscribirme · ", "Pay and join · ")) + App.money(tr.price) + "</button>" + backBtn("consent") + "</div></div>",
-      tx("Tarjeta de prueba, PayPal y móvil de ATH Móvil ya vienen llenos. ATH Móvil muestra la espera de aprobación con cuenta regresiva; PayPal o tarjeta confirman al instante y permiten auto-renovación (apagada por defecto).", "Test card, PayPal and ATH Móvil number are prefilled. ATH Móvil shows the approval wait with a countdown; PayPal or card confirm instantly and allow auto-renew (off by default)."));
+      '<div class="stack-2"><button type="button" class="btn btn-tenant btn-xl btn-block" data-act="pay">' + (vm.method === "ath" ? '<span class="wm wm-ath" style="color:#fff">ATH</span>' + tx("Pagar con ATH Móvil · ", "Pay with ATH Móvil · ") : vm.method === "desk" ? ic("desk", "i-sm") + tx("Reservar y pagar en recepción · ", "Reserve and pay at the desk · ") : ic("lock", "i-sm") + tx("Pagar e inscribirme · ", "Pay and join · ")) + App.money(tr.price) + "</button>" + backBtn("consent") + "</div></div>",
+      tx("Tarjeta de prueba y móvil de ATH Móvil ya vienen llenos. Tarjeta confirma al instante y permite auto-renovación (apagada por defecto); ATH Móvil muestra la espera con cuenta regresiva; «Pago en recepción» deja la inscripción pendiente hasta que el personal cobre.", "Test card and ATH Móvil number are prefilled. Card confirms instantly and allows auto-renew (off by default); ATH Móvil shows the countdown wait; “Pay at front desk” leaves the sign-up pending until staff collect."));
   }
   function vAth() {
     return shell('<div class="m-content" style="padding-top:22px">' + App.athView({ amount: App.ten().tiers[vm.tier].price, phone: vm.athPhone || vm.f.phone, expired: vm.expired }) + "</div>",
@@ -152,12 +152,23 @@
   function vDone() {
     var t = App.ten(), m = App.member(vm.newId);
     if (!m) { vm.view = "plan"; return vPlan(); }
+    if (m.payPending) return vPending(m);
     return shell('<div class="m-content" style="padding-top:28px"><div style="text-align:center" class="stack-3"><div class="ok-badge">' + ic("check") + '</div><h1 style="font-size:26px;line-height:32px;margin-top:18px">' + tx("¡Bienvenido/a, ", "Welcome, ") + App.first(m.name) + '!</h1><p class="muted" style="font-size:15px;line-height:22px">' + tx("Tu membresía está activa hasta el ", "Your membership is active through ") + '<strong style="color:var(--n-900)">' + App.fd(m.expires) + "</strong>.</p></div>" +
       '<a class="mini-card plain" href="card.html?m=' + m.id + '"><div class="qr"><img src="' + App.qr(m.id) + '" alt="' + tx("Código QR", "QR code") + '"></div><div class="grow" style="position:relative"><div class="row" style="gap:6px;margin-bottom:6px"><svg style="width:20px;height:20px">' + App.mark(true) + '</svg><span style="font-size:12px;font-weight:600;opacity:.9">' + t.name + '</span></div><div style="font-weight:700;font-size:16px;line-height:20px">' + m.name + '</div><div style="font-size:12.5px;opacity:.88">' + App.tierName(m.tier) + " · " + m.id + '</div><div style="margin-top:8px"><span class="badge" style="background:rgba(255,255,255,.95);color:var(--ok-700)">' + ic("check-circle") + tx("Activa", "Active") + "</span></div></div></a>" +
       '<div class="m-card m-card-pad stack-2"><div class="row" style="gap:8px">' + ic("check-circle", "i-sm") + "<span>" + tx("Relevo v" + t.waiver.v + " firmado en " + (m.waiver.lang === "en" ? "inglés" : "español") + " · PDF enviado a ", "Waiver v" + t.waiver.v + " signed in " + (m.waiver.lang === "en" ? "English" : "Spanish") + " · PDF sent to ") + m.email + '</span></div><div class="row" style="gap:8px">' + ic(m.sms ? "sms" : "mail", "i-sm") + "<span>" + (m.sms ? tx("Textos aceptados · te enviamos la bienvenida al ", "Texts accepted · welcome text sent to ") + m.phone : tx("Sin textos · avisos solo por email", "No texts · email notices only")) + "</span></div>" + (vm.hh.length ? '<div class="row" style="gap:8px">' + ic("users", "i-sm") + "<span>" + vm.hh.length + tx(" adulto(s) del hogar recibirán su invitación para firmar su relevo", " household adult(s) will get an invite to sign their own waiver") + "</span></div>" : "") + "</div>" +
       '<div class="callout warn">' + ic("orientation") + "<span>" + tx("Siguiente paso: completa la orientación de seguridad en recepción en tu primera visita.", "Next step: complete the safety orientation at the front desk on your first visit.") + "</span></div>" +
       '<div class="stack-2"><a class="btn btn-primary btn-lg btn-block" href="card.html?m=' + m.id + '">' + ic("id", "i-sm") + tx("Ver mi tarjeta digital", "Open my digital card") + '</a><a class="btn btn-secondary btn-lg btn-block" href="portal.html?m=' + m.id + '">' + ic("home", "i-sm") + tx("Ir a mi portal", "Go to my portal") + "</a></div></div>",
       tx("Inscripción completa: el miembro ya aparece en Miembros y en recepción (con orientación pendiente). Siguiente: el dueño ejecuta los recordatorios de hoy.", "Sign-up complete: the member now shows in Members and at the desk (orientation pending). Next: the owner runs today's reminders."), tx("Inscripción completa", "Sign-up complete"));
+  }
+
+  function vPending(m) {
+    var t = App.ten(), pp = m.payPending;
+    return shell('<div class="m-content" style="padding-top:28px" data-pending><div style="text-align:center" class="stack-3"><div class="ok-badge" style="background:var(--warn-600);box-shadow:0 0 0 10px var(--warn-50)">' + ic("hourglass") + '</div><h1 style="font-size:24px;line-height:30px;margin-top:18px">' + tx("Inscripción reservada · pendiente de pago en recepción", "Sign-up reserved · payment pending at the front desk") + '</h1><p class="muted" style="font-size:15px;line-height:22px">' + tx("Gracias, " + App.first(m.name) + ". Tu membresía queda <strong>Pendiente</strong> hasta que pagues en recepción.", "Thanks, " + App.first(m.name) + ". Your membership stays <strong>Pending</strong> until you pay at the front desk.") + "</p></div>" +
+      '<div class="m-card m-card-pad stack-2"><div class="kv"><span class="k">' + tx("Miembro", "Member") + '</span><span class="v">' + m.name + '<br><span class="xs subtle">' + m.id + '</span></span></div><div class="kv"><span class="k">' + tx("Plan", "Plan") + '</span><span class="v">' + App.tierName(pp.tier) + '</span></div><div class="kv"><span class="k">' + tx("Monto", "Amount") + '</span><span class="v">' + App.money(pp.amount) + '</span></div><div class="kv"><span class="k">' + tx("Paga a más tardar", "Pay by") + '</span><span class="v" style="color:var(--warn-700)">' + App.fd(pp.due) + '</span></div><div class="kv"><span class="k">' + tx("Estado", "Status") + '</span><span class="v">' + App.badge("pending") + "</span></div></div>" +
+      '<div class="callout tenant">' + ic("desk") + "<span>" + tx("Trae <strong>" + App.money(pp.amount) + "</strong> en efectivo o un cheque a nombre de <strong>" + t.name + "</strong> a recepción a más tardar el <strong>" + App.fd(pp.due, "es") + "</strong>. Al confirmar el pago, tu membresía queda activa por un año y tu tarjeta digital lista. Ese día también haces la orientación de seguridad.", "Bring <strong>" + App.money(pp.amount) + "</strong> in cash or a check payable to <strong>" + t.name + "</strong> to the front desk by <strong>" + App.fd(pp.due, "en") + "</strong>. Once staff confirm the payment, your membership is active for a year and your digital card is ready. Do the safety orientation that day too.") + "</span></div>" +
+      '<div class="m-card m-card-pad stack-2"><div class="row" style="gap:8px">' + ic("check-circle", "i-sm") + "<span>" + tx("Relevo v" + t.waiver.v + " firmado · PDF enviado a ", "Waiver v" + t.waiver.v + " signed · PDF sent to ") + m.email + '</span></div><div class="row" style="gap:8px">' + ic("mail", "i-sm") + "<span>" + tx("Te enviamos estas instrucciones por email.", "We emailed you these instructions.") + "</span></div></div>" +
+      '<div class="stack-2"><a class="btn btn-primary btn-lg btn-block" href="portal.html?m=' + m.id + '">' + ic("home", "i-sm") + tx("Ir a mi portal", "Go to my portal") + "</a></div></div>",
+      tx("Pago en recepción: la inscripción queda <strong>Pendiente</strong>. En recepción, el miembro aparece con «Pago pendiente en recepción» y «Cobrar» de un toque.", "Pay at front desk: the sign-up stays <strong>Pending</strong>. At the desk the member shows “Payment pending at front desk” with one-tap “Collect”."), tx("Inscripción reservada", "Sign-up reserved"));
   }
 
   function render() {
@@ -169,15 +180,16 @@
   function createMember() {
     var t = App.ten(), ts = App.ts(), tr = t.tiers[vm.tier], f = vm.f;
     var id = App.nextId() || (t.prefix + "-1099" + ts.added.length);
-    var exp = tr.term === "month" ? App.addMonths(App.TODAY, 1) : App.addMonths(App.TODAY, 12);
-    var m = { id: id, name: f.name.trim().replace(/\s+/g, " "), av: "av-4", p: 6, email: f.email.trim(), phone: f.phone.trim(), tier: vm.tier, expires: exp, used: 0,
-      autorenew: vm.autorenew && vm.method !== "ath" ? vm.method : null, waiver: { v: t.waiver.v, date: App.TODAY, lang: vm.wl }, orient: null, last: null,
-      pref: f.pref, sms: !!vm.sms, emailOk: vm.emailOk, dob: dobCheck(f.dob).iso, since: 2026, pay: [[App.TODAY, tr.price, vm.method]], town: f.town, zip: f.zip, emer: f.emer.trim(), lic: { no: f.licNo.trim().toUpperCase(), exp: parseDob(f.licExp) }, newSignup: true };
+    var exp = tr.term === "month" ? App.addMonths(App.TODAY, 1) : App.addMonths(App.TODAY, 12), atDesk = vm.method === "desk";
+    var m = { id: id, name: f.name.trim().replace(/\s+/g, " "), av: "av-4", p: 6, email: f.email.trim(), phone: f.phone.trim(), tier: vm.tier, expires: atDesk ? null : exp, status: atDesk ? "pending" : null, used: 0,
+      autorenew: vm.autorenew && vm.method === "card" ? "card" : null, waiver: { v: t.waiver.v, date: App.TODAY, lang: vm.wl }, orient: null, last: null,
+      pref: f.pref, sms: !!vm.sms, emailOk: vm.emailOk, dob: dobCheck(f.dob).iso, since: 2026, pay: atDesk ? [] : [[App.TODAY, tr.price, vm.method]], town: f.town, zip: f.zip, emer: f.emer.trim(), lic: { no: f.licNo.trim().toUpperCase(), exp: parseDob(f.licExp) }, newSignup: true };
     ts.added.push(m); App.save();
     vm.hh.forEach(function (h, i) { var hid = App.nextId() || (id + "-" + (i + 2)); ts.added.push({ id: hid, name: h.name, av: "av-" + ((i % 6) + 2), p: (i + 2) % 7, hh: id, email: "", phone: "", waiver: null, orient: null, last: null, dob: h.iso, newSignup: true }); App.save(); });
-    App.event({ type: "signup", id: id, name: m.name, amount: tr.price, tier: vm.tier, method: vm.method });
+    App.event({ type: "signup", id: id, name: m.name, amount: tr.price, tier: vm.tier, method: vm.method, pay: App.payInfo(vm, tr.price) });
     App.event({ type: "waiver", id: id, name: m.name, lang: vm.wl, where: "online" });
-    App.queueMsg({ kind: "welcome", mid: id, ch: (vm.sms ? ["sms"] : []).concat(["email"]) });
+    if (atDesk) App.reservePay(id, { kind: "signup", tier: vm.tier, src: "signup", due: App.addDays(App.TODAY, t.grace) });
+    else App.queueMsg({ kind: "welcome", mid: id, ch: (vm.sms ? ["sms"] : []).concat(["email"]) });
     ts.current = id; App.save();
     vm.newId = id; App.athStop(); goView("done");
   }
@@ -244,6 +256,7 @@
       pay: function () {
         var pe = App.payCheck(vm); if (pe) { App.toast(pe, "warn"); return; }
         if (vm.method === "ath") { goView("ath"); startAth(); return; }
+        if (vm.method === "desk") { createMember(); return; }
         App.simulatePay(vm, App.ten().tiers[vm.tier].price, { email: vm.f.email }, createMember);
       },
       athApprove: function () { App.athStop(); App.modal({ sticky: true, render: App.spinner(tx("ATH Móvil aprobado · confirmando…", "ATH Móvil approved · confirming…")) }); setTimeout(function () { App.modalDef = null; App.renderModal(); createMember(); }, 900); },

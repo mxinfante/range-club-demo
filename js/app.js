@@ -16,6 +16,7 @@
   function defSettings(d) { return { close: d.close, licCh: { email: true, push: true, app: true, sms: false } }; }
   function blankTenant(k) {
     var d = D[k], now = Date.now(), n = 0, m = {};
+    if (d.paySeed) { var ps = d.paySeed, pm = d.members.filter(function (x) { return x.id === ps.id; })[0]; if (pm) m[ps.id] = { payPending: { kind: "renew", tier: pm.tier, amount: d.tiers[pm.tier].price, src: ps.src, step: null, ch: null, on: ps.on, at: 0, due: new Date(Date.parse(ps.on + "T00:00:00Z") + d.grace * 864e5).toISOString().slice(0, 10), prev: "lapsed" } }; }
     var visits = (d.visitSeed || []).map(function (v) {
       var mem = d.members.filter(function (x) { return x.id === v.id; })[0] || {};
       m[v.id] = { last: TODAY };
@@ -174,6 +175,17 @@
       C.m = ["bad", ["Cancelada", "Cancelled"], [tx("Desde ", "Since ") + App.fds(p.expires)]];
       B.push({ kind: "bad", icon: "minus-circle", t: tx("Membresía cancelada", "Membership cancelled"), d: tx("Puede volver a inscribirse hoy mismo.", "Can re-join today."), fix: tx("Reinscribir · ", "Re-join · ") + price, act: "fixRenew", icon2: "renew" });
     }
+    /* member chose "pay at front desk" online: one blocker with a one-tap "Cobrar" (replaces the renew blocker). Status is unchanged until paid. */
+    var PP = p.payPending;
+    if (PP && (st === "active" || st === "grace" || st === "lapsed" || st === "pending")) {
+      var soft = st === "active" || (st === "grace" && t.checkinInGrace);
+      B = B.filter(function (b) { return b.act !== "fixRenew"; });
+      B.push({ kind: soft ? "warn" : "bad", soft: soft, icon: "hourglass", pay: true, t: tx("Pago pendiente en recepción", "Payment pending at front desk"),
+        d: tx((PP.kind === "signup" ? "Se inscribió" : "Reservó la renovación") + " en línea el " + App.fds(PP.on, "es") + " para pagar aquí: " + App.money(PP.amount) + " en efectivo o cheque. Fecha límite: " + App.fd(PP.due, "es") + "." + (st === "active" ? " Su membresía sigue activa mientras tanto." : ""),
+          (PP.kind === "signup" ? "Signed up" : "Reserved the renewal") + " online on " + App.fds(PP.on, "en") + " to pay here: " + App.money(PP.amount) + " in cash or by check. Pay by " + App.fd(PP.due, "en") + "." + (st === "active" ? " Membership stays active meanwhile." : "")),
+        fix: tx("Cobrar · ", "Collect · ") + App.money(PP.amount, false), act: "fixCollect", icon2: "dollar" });
+      C.m = [C.m ? C.m[0] : "warn", st === "pending" ? ["Pago pendiente", "Payment pending"] : C.m[1], [tx("Pago pendiente en recepción", "Payment pending at desk")]];
+    }
     if (m.waiver && m.waiver.v === t.waiver.v) C.w = ["ok", ["Al día", "Current"], [tx("Firmado ", "Signed ") + App.fds(m.waiver.date)]];
     else {
       C.w = ["req", m.waiver ? ["Firmó v" + m.waiver.v, "Signed v" + m.waiver.v] : ["Falta", "Missing"], [tx("Actual: v", "Current: v") + t.waiver.v]];
@@ -231,14 +243,66 @@
     var tierKey = o.tier || p.tier, tr = t.tiers[tierKey];
     var from = (st === "active" || st === "grace") && p.expires ? p.expires : TODAY;
     var exp = tr.term === "month" ? App.addMonths(from, 1) : App.addMonths(from, 12);
-    var auto = o.autorenew && o.method !== "ath" ? o.method : null;
+    var auto = o.autorenew && o.method === "card" ? "card" : null; // auto-renew only with card
     var receipt = App.nextReceipt();
-    App.update(p.id, { tier: tierKey, expires: exp, status: null, used: 0, autorenew: auto, renewedAt: Date.now(), renewedSrc: o.src });
-    App.event({ type: "renewal", id: p.id, name: p.name, src: o.src, method: o.method, amount: tr.price, tier: tierKey, prev: st, exp: exp, receipt: receipt, step: o.step || null, ch: o.ch || null });
+    App.update(p.id, { tier: tierKey, expires: exp, status: null, used: 0, autorenew: auto, renewedAt: Date.now(), renewedSrc: o.src, payPending: null });
+    App.event({ type: "renewal", id: p.id, name: p.name, src: o.src, method: o.method, pay: o.pay || null, amount: tr.price, tier: tierKey, prev: st, exp: exp, receipt: receipt, step: o.step || null, ch: o.ch || null, collected: !!o.collected });
     if (o.src !== "desk") { App.ts().current = p.id; save(); }
-    App.queueMsg({ kind: "receipt", mid: p.id, ch: ["email"] });
-    return { receipt: receipt, exp: exp, tier: tr, amount: tr.price, prev: st, auto: auto };
+    App.queueMsg({ kind: "receipt", mid: p.id, ch: ["email"], method: o.method, pay: o.pay || null, receipt: receipt });
+    return { receipt: receipt, exp: exp, tier: tr, amount: tr.price, prev: st, auto: auto, method: o.method, pay: o.pay || null };
   };
+  /* Pay at the front desk (cash / check), chosen by the member online: the renewal or sign-up is reserved, the member keeps
+     their current status, and staff complete it with one tap ("Cobrar") at the desk. Pay-by date stays inside the grace period. */
+  App.payDue = function (p, list) {
+    var st = App.status(p, list), g = App.ten().grace;
+    if (st === "active") return App.addDays(p.expires, g);
+    if (st === "grace") return App.graceEnd(p, list);
+    return App.addDays(TODAY, g);
+  };
+  App.reservePay = function (id, o) {
+    var list = App.members(), m = App.member(id, list), p = App.primary(m, list), t = App.ten(), tierKey = o.tier || p.tier, tr = t.tiers[tierKey];
+    var pp = { kind: o.kind || "renew", tier: tierKey, amount: tr.price, src: o.src || "link", step: o.step || null, ch: o.ch || null, on: TODAY, at: Date.now(), due: o.due || App.payDue(p, list), prev: App.status(p, list) };
+    App.update(p.id, { payPending: pp });
+    App.event({ type: "payPending", id: p.id, name: p.name, amount: pp.amount, src: pp.src, kind: pp.kind, due: pp.due });
+    App.queueMsg({ kind: "payPending", mid: p.id, ch: ["email"] });
+    return pp;
+  };
+  App.collectPending = function (id, method, pay, autorenew) {
+    var list = App.members(), m = App.member(id, list), p = App.primary(m, list), pp = p.payPending, t = App.ten();
+    if (!pp) return null;
+    if (pp.kind === "signup") {
+      var tr = t.tiers[pp.tier], exp = tr.term === "month" ? App.addMonths(TODAY, 1) : App.addMonths(TODAY, 12), receipt = App.nextReceipt();
+      App.update(p.id, { status: null, expires: exp, payPending: null, pay: [[TODAY, tr.price, method]], autorenew: autorenew && method === "card" ? "card" : null });
+      App.event({ type: "payment", kind: "signup", id: p.id, name: p.name, amount: tr.price, method: method, pay: pay || null, receipt: receipt, exp: exp });
+      App.queueMsg({ kind: "receipt", mid: p.id, ch: ["email"], method: method, pay: pay || null, receipt: receipt });
+      return { receipt: receipt, exp: exp, tier: tr, amount: tr.price, prev: "pending", auto: null, method: method, pay: pay || null };
+    }
+    return App.renew(p.id, { tier: pp.tier, method: method, pay: pay, autorenew: autorenew, src: pp.src, step: pp.step, ch: pp.ch, collected: true });
+  };
+  /* Payment method names (generic: no processor or card-network brands). Member-initiated: card / ath / desk; staff at desk: card / ath / cash / check. */
+  App.payName = function (k, lang) {
+    var e = (lang || S.lang) === "en";
+    return { card: e ? "Credit/debit card" : "Tarjeta de crédito/débito", ath: "ATH Móvil", desk: e ? "Pay at front desk (cash/check)" : "Pago en recepción (efectivo/cheque)", cash: e ? "Cash" : "Efectivo", check: e ? "Check" : "Cheque" }[k] || "";
+  };
+  App.payShort = function (k, lang) { var e = (lang || S.lang) === "en"; return { card: e ? "card" : "tarjeta", ath: "ATH Móvil", desk: e ? "pay at desk" : "pago en recepción", cash: e ? "cash" : "efectivo", check: e ? "check" : "cheque" }[k] || ""; };
+  /* receipt line: "Tarjeta •••• 1111", "Efectivo · recibido $380.00 · cambio $20.00", "Cheque #1047" */
+  App.payLine = function (method, pay, lang) {
+    var e = (lang || S.lang) === "en"; pay = pay || {};
+    if (method === "card") return (e ? "Card" : "Tarjeta") + (pay.last4 ? " •••• " + pay.last4 : "");
+    if (method === "ath") return "ATH Móvil" + (pay.phone ? " · " + App.mask(pay.phone) : "");
+    if (method === "cash") return (e ? "Cash" : "Efectivo") + (pay.rec != null ? (e ? " · received " : " · recibido ") + App.money(pay.rec) + (e ? " · change " : " · cambio ") + App.money(pay.chg || 0) : "");
+    if (method === "check") return (e ? "Check" : "Cheque") + (pay.chk ? " #" + pay.chk : "");
+    if (method === "desk") return App.payName("desk", lang);
+    return "";
+  };
+  App.payInfo = function (vm, amount) {
+    if (vm.method === "card") return { last4: String((vm.card && vm.card.num) || "").replace(/\D/g, "").slice(-4) };
+    if (vm.method === "ath") return { phone: vm.athPhone };
+    if (vm.method === "cash") { var r = App.num(vm.cashRec); return { rec: r, chg: Math.max(0, Math.round((r - amount) * 100) / 100) }; }
+    if (vm.method === "check") return { chk: String(vm.chkNo || "").trim() };
+    return null;
+  };
+  App.num = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; };
   /* Guests are logged as their own visits under the host member:
      type "guest" = shooting guest (guest pass or fee; own gun license + caliber), type "companion" = non-shooting companion (no license / caliber). */
   App.addGuestVisit = function (host, g, where) {
@@ -393,6 +457,7 @@
       if (d === 30) step = "d30"; else if (d === 14) step = "d14"; else if (d === 7) step = "d7"; else if (d === 1) step = "d1"; else if (d === 0) step = "d0";
       else if (d === -3) step = "g3"; else if (d === -(t.grace + 1)) step = "lapsed";
       if (!step) return;
+      if (m.payPending) { msgs.push({ kind: "skip", mid: m.id, step: step, ch: [], pend: true }); return; }
       if (m.autorenew) {
         if (step === "d7") msgs.push({ kind: "auto7", mid: m.id, ch: ["email", "sms"] });
         else msgs.push({ kind: "skip", mid: m.id, step: step, ch: [] });
@@ -441,9 +506,9 @@
       else { sms = e(t.name + ": Hola " + first + ", tu membresía vence " + when + ". Renueva en 1 minuto: " + link + " · STOP para salir", t.name + ": Hi " + first + ", your membership expires " + when + ". Renew in 1 minute: " + link + " · Reply STOP to opt out"); subj = msg.step === "d1" ? e("Tu membresía vence mañana", "Your membership expires tomorrow") : msg.step === "d0" ? e("Tu membresía vence hoy", "Your membership expires today") : e("Tu membresía vence el " + exp, "Your membership expires " + exp); }
       body = [e("Hola " + first + ",", "Hi " + first + ","),
         msg.step === "g3" || msg.step === "lapsed" ? e("Tu membresía " + tr.es + " venció el " + exp + ".", "Your " + tr.en + " membership expired " + exp + ".") : e("Tu membresía " + tr.es + " vence " + when + ".", "Your " + tr.en + " membership expires " + when + "."),
-        e("Renueva en un minuto, sin contraseña: " + App.money(tr.price) + " con PayPal, tarjeta o ATH Móvil.", "Renew in a minute, no password: " + App.money(tr.price) + " with PayPal, card or ATH Móvil.")];
+        e("Renueva en un minuto, sin contraseña: " + App.money(tr.price) + " con tarjeta de crédito/débito o ATH Móvil, o resérvala y paga en recepción (efectivo o cheque).", "Renew in a minute, no password: " + App.money(tr.price) + " by credit/debit card or ATH Móvil, or reserve it and pay at the front desk (cash or check).")];
     } else if (msg.kind === "auto7") {
-      var mth = m.autorenew === "paypal" ? "PayPal" : e("tu tarjeta", "your card");
+      var mth = e("tu tarjeta", "your card");
       sms = e(t.name + ": " + first + ", el " + exp + " cobraremos " + App.money(tr.price) + " a " + mth + " para renovar tu membresía. Para cancelar: " + t.host + "/p · STOP para salir", t.name + ": " + first + ", on " + exp + " we'll charge " + App.money(tr.price) + " to " + mth + " to renew your membership. To cancel: " + t.host + "/p · Reply STOP to opt out");
       subj = e("Próximo cobro de auto-renovación: " + exp, "Upcoming auto-renew charge: " + exp);
       body = [e("Hola " + first + ",", "Hi " + first + ","), e("Tu membresía se renovará automáticamente el " + exp + " por " + App.money(tr.price) + ".", "Your membership will renew automatically on " + exp + " for " + App.money(tr.price) + "."), e("Puedes cancelar la auto-renovación desde tu portal en cualquier momento.", "You can cancel auto-renew from your portal at any time.")];
@@ -458,8 +523,17 @@
     } else if (msg.kind === "receipt") {
       var p2 = App.member(msg.mid, list) || m, tr2 = t.tiers[p2.tier] || tr;
       subj = e("Recibo: membresía renovada hasta el " + App.fd(p2.expires, "es"), "Receipt: membership renewed until " + App.fd(p2.expires, "en"));
-      body = [e("Hola " + first + ",", "Hi " + first + ","), e("Recibimos tu pago de " + App.money(tr2.price) + ". Tu membresía está activa hasta el " + App.fd(p2.expires, "es") + ".", "We received your payment of " + App.money(tr2.price) + ". Your membership is active until " + App.fd(p2.expires, "en") + ".")];
+      var pl = App.payLine(msg.method, msg.pay, L);
+      body = [e("Hola " + first + ",", "Hi " + first + ","), e("Recibimos tu pago de " + App.money(tr2.price) + ". Tu membresía está activa hasta el " + App.fd(p2.expires, "es") + ".", "We received your payment of " + App.money(tr2.price) + ". Your membership is active until " + App.fd(p2.expires, "en") + ".")]
+        .concat(pl ? [e("Método de pago: " + pl + (msg.receipt ? " · Recibo " + msg.receipt : "") + ".", "Payment method: " + pl + (msg.receipt ? " · Receipt " + msg.receipt : "") + ".")] : []);
       cta = e("Ver mi tarjeta digital", "View my digital card");
+    } else if (msg.kind === "payPending") {
+      var p3 = App.member(msg.mid, list) || m, pp3 = p3.payPending || {}, amt3 = App.money(pp3.amount || tr.price), due3 = pp3.due ? App.fd(pp3.due, L) : "";
+      subj = e("Pendiente de pago en recepción: " + amt3 + " antes del " + due3, "Payment pending at the front desk: " + amt3 + " by " + due3);
+      body = [e("Hola " + first + ",", "Hi " + first + ","),
+        pp3.kind === "signup" ? e("Reservamos tu inscripción. Se activa cuando pagues en recepción.", "We reserved your sign-up. It activates when you pay at the front desk.") : e("Reservamos tu renovación. Tu membresía sigue como está hasta que pagues en recepción.", "We reserved your renewal. Your membership stays as it is until you pay at the front desk."),
+        e("Trae " + amt3 + " en efectivo o un cheque a nombre de " + t.name + " a más tardar el " + due3 + ".", "Bring " + amt3 + " in cash or a check payable to " + t.name + " by " + due3 + ".")];
+      cta = e("Ver mi portal", "Open my portal");
     }
     var push = null, inapp = null;
     if (msg.kind === "lic") {
@@ -513,6 +587,7 @@
     var d = function (k) { return a1[k] - a0[k]; };
     var ev = App.ts().events, ren = ev.filter(function (e) { return e.type === "renewal"; });
     var src = Object.assign({}, b.src); ren.forEach(function (e) { if (src[e.src] != null) src[e.src]++; });
+    var meth = Object.assign({}, b.meth); ren.forEach(function (e) { if (src[e.src] == null) return; meth[e.method === "card" ? "card" : e.method === "ath" ? "ath" : "desk"]++; });
     var steps = clone(b.steps); ren.forEach(function (e) { if (e.src === "link" && e.step && steps[e.step]) { var i = (e.step === "d30" || e.step === "d14") ? 0 : (e.ch === "email" ? 1 : 0); steps[e.step][i]++; } });
     var checkins = ev.filter(function (e) { return e.type === "checkin"; });
     var visits = checkins.reduce(function (n, e) { return n + 1 + (e.guests || []).length; }, 0);
@@ -524,7 +599,7 @@
       risk: graceV + b.failedV, failedN: b.failedN, failedV: b.failedV,
       lapsedN: b.lapsedN + d("lapsedN"), lapsedV: b.lapsedV + d("lapsedV"),
       rate: b.rate, rateDelta: b.rateDelta, ratePrev: b.ratePrev, renewalsToday: ren.length, signupsToday: ev.filter(function (e) { return e.type === "signup"; }).length,
-      src: src, steps: steps, visitsToday: b.days[13] + visits, checkinsToday: checkins.length, counts: counts, households: b.households + App.ts().added.filter(function (m) { return !m.hh; }).length
+      src: src, meth: meth, steps: steps, visitsToday: b.days[13] + visits, checkinsToday: checkins.length, counts: counts, households: b.households + App.ts().added.filter(function (m) { return !m.hh; }).length
     };
   };
 
@@ -545,7 +620,8 @@
      clear space = teal-dot height ≈ 12% of the mark; never recolored). Text in muted slate. */
   App.endorse = function (size, cls) {
     size = size || 16;
-    return '<span class="endorse' + (cls ? " " + cls : "") + '" data-endorse><img class="ia-mark" src="assets/brand/ia-mark.svg" width="' + size + '" height="' + size + '" alt="iA" style="margin:' + Math.max(2, Math.round(size * 0.125)) + 'px"><span>' + tx("Range Club, por Infante Automation", "Range Club, by Infante Automation") + "</span></span>";
+    var src = size >= 24 ? "assets/brand/mark.svg" : "assets/brand/ia-mark.svg"; // >= 24px: mark.svg; below 24px: badge (favicon.svg)
+    return '<span class="endorse' + (cls ? " " + cls : "") + '" data-endorse><img class="ia-mark" src="' + src + '" width="' + size + '" height="' + size + '" alt="iA" style="margin:' + Math.max(2, Math.round(size * 0.125)) + 'px"><span>' + tx("Range Club, por Infante Automation", "Range Club, by Infante Automation") + "</span></span>";
   };
   App.powered = function () { return '<span class="powered"><svg><use href="#rc-mark"/></svg>' + tx("Con la tecnología de Range Club", "Powered by Range Club") + "</span>" + '<div class="endorse-row">' + App.endorse(16) + "</div>"; };
 
@@ -572,7 +648,7 @@
   App.STEPS = [
     { n: 1, page: "signup", href: "signup.html", t: ["Inscripción desde el teléfono", "Sign-up on a phone"], d: ["Un miembro nuevo elige plan, valida 21+, registra su licencia de armas, firma el relevo bilingüe y acepta textos. Todo viene lleno: solo toca.", "A new member picks a plan, passes the 21+ check, adds their gun license, signs the bilingual waiver and opts in to texts. Everything is prefilled: just tap."] },
     { n: 2, page: "outbox", href: "dashboard.html", t: ["Recordatorios de hoy", "Today's reminders"], d: ["El dueño ejecuta los recordatorios: renovaciones por texto y email; licencias de armas por email, push y en la app (SMS solo si el club lo activa).", "The owner runs today's reminders: renewals by text and email; gun licenses by email, push and in-app (SMS only if the range turns it on)."] },
-    { n: 3, page: "renew", href: "renew.html", t: ["Renovación en un clic", "One-click renewal"], d: ["El miembro toca el enlace y renueva con PayPal, tarjeta o ATH Móvil, sin iniciar sesión.", "The member taps the link and renews with PayPal, card or ATH Móvil, no login."] },
+    { n: 3, page: "renew", href: "renew.html", t: ["Renovación en un clic", "One-click renewal"], d: ["El miembro toca el enlace y renueva con tarjeta, ATH Móvil o pago en recepción, sin iniciar sesión.", "The member taps the link and renews by card, ATH Móvil or pay at the front desk, no login."] },
     { n: 4, page: "card", href: "portal.html", t: ["Portal y tarjeta digital", "Portal & digital card"], d: ["La membresía ya está Activa; su tarjeta QR es la que se escanea en recepción.", "The membership is now Active; the QR card is what the front desk scans."] },
     { n: 5, page: "checkin", href: "checkin.html", t: ["Recepción: entrada y salida", "Front desk: check-in & check-out"], d: ["Uno pasa, uno vencido (Renovar ahora → entra con su calibre → registra su salida con la duración), uno con relevo viejo y uno con licencia de armas vencida: rechazo en rojo.", "One cleared, one lapsed (Renew now → in with their caliber → checks out with duration), one with an old waiver and one with an expired gun license: red refusal."] },
     { n: 6, page: "dashboard", href: "dashboard.html", t: ["Panel del dueño", "Owner dashboard"], d: ["Quién está en las instalaciones ahora, licencias por vencer, el registro de visitas oficial con CSV y el cierre del día con salida forzada.", "Who's on site now, expiring licenses, the official visit log with CSV and end of day with forced check-out."] },
@@ -705,6 +781,7 @@
   document.addEventListener("input", function (e) {
     var k = e.target && e.target.dataset && e.target.dataset.pay, c = App.payCtx; if (!k || !c) return;
     if (["holder", "num", "exp", "cvv", "zip"].indexOf(k) >= 0) { c.card = c.card || {}; c.card[k] = e.target.value; } else c[k] = e.target.value;
+    if (k === "cashRec") { var ch = document.querySelector("[data-change]"); if (ch) ch.textContent = App.money(Math.max(0, App.num(c.cashRec) - (c.amount || 0))); }
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && App.modalDef && !App.modalDef.sticky) App.closeModal(); });
 
@@ -714,7 +791,8 @@
     var d = App.ten().demo; who = who || {};
     if (!vm.card) vm.card = { holder: who.name || "", num: d.card.num, exp: d.card.exp, cvv: d.card.cvv, zip: App.ten().zip };
     if (vm.athPhone == null) vm.athPhone = who.phone || "";
-    if (vm.ppEmail == null) vm.ppEmail = who.email || "";
+    if (vm.amount != null && vm.cashRec == null) vm.cashRec = (Math.floor(vm.amount / 20) * 20 + 20).toFixed(2); // prefilled: next $20 bill above the amount
+    if (vm.chkNo == null) vm.chkNo = d.chk || "1047";
   };
   App.payCheck = function (vm) {
     if (vm.method === "card") {
@@ -726,46 +804,56 @@
       if (!/^\d{5}$/.test(String(c.zip || "").trim())) return tx("Código postal de 5 dígitos.", "5-digit ZIP code.");
     }
     if (vm.method === "ath" && String(vm.athPhone || "").replace(/\D/g, "").length !== 10) return tx("Escribe el móvil de ATH Móvil (10 dígitos).", "Enter the ATH Móvil mobile number (10 digits).");
+    if (vm.method === "cash" && App.num(vm.cashRec) < (vm.amount || 0)) return tx("El efectivo recibido no cubre el total.", "Cash received doesn't cover the total.");
+    if (vm.method === "check" && !/^\d{3,8}$/.test(String(vm.chkNo || "").trim())) return tx("Escribe el número del cheque (3 a 8 dígitos).", "Enter the check number (3 to 8 digits).");
     return null;
   };
+  /* vm.desk = true: staff at the front desk (card / ATH Móvil / cash / check, completes now).
+     Otherwise member-initiated (card / ATH Móvil / pay at front desk = reserved, pending until staff collect). No processor or card-network logos. */
+  App.payMethods = function (vm) { return vm.desk ? ["card", "ath", "cash", "check"] : ["card", "ath", "desk"]; };
   App.payPicker = function (vm, who) {
     App.payDefaults(vm, who); App.payCtx = vm;
+    if (App.payMethods(vm).indexOf(vm.method) < 0) vm.method = "card";
     var pin = function (k, label, val, attrs) { return '<label class="pf"><span class="pf-l">' + label + '</span><input class="input" data-pay="' + k + '" value="' + App.esc(val) + '"' + (attrs || "") + "></label>"; };
     var opt = function (k, inner) { return '<button type="button" class="pay-opt' + (vm.method === k ? " is-selected" : "") + '" data-act="payMethod" data-v="' + k + '" aria-pressed="' + (vm.method === k) + '">' + (vm.method === k ? '<span class="sel">' + ic("check") + "</span>" : "") + inner + "</button>"; };
-    var html = '<div class="pay-opts">' + opt("paypal", '<span class="wm wm-paypal">Pay<b>Pal</b></span><span>PayPal</span>') + opt("card", ic("card", "i-lg") + "<span>" + tx("Tarjeta", "Card") + "</span>") + opt("ath", '<span class="wm wm-ath">ATH</span><span>ATH Móvil</span>') + "</div>";
-    if (vm.method === "card") html += '<div class="hosted"><div class="hosted-label">' + ic("lock") + tx("Campos seguros de PayPal · nunca vemos tu tarjeta", "PayPal secure fields · we never see your card") + "</div>" +
+    var face = {
+      card: ic("card", "i-lg") + "<span>" + tx("Tarjeta de crédito/débito", "Credit/debit card") + "</span>",
+      ath: '<span class="wm wm-ath">ATH</span><span>ATH Móvil</span>',
+      desk: ic("desk", "i-lg") + "<span>" + tx("Pago en recepción", "Pay at front desk") + '<small class="po-sub">' + tx("efectivo/cheque", "cash/check") + "</small></span>",
+      cash: ic("dollar", "i-lg") + "<span>" + tx("Efectivo", "Cash") + "</span>",
+      check: ic("receipt", "i-lg") + "<span>" + tx("Cheque", "Check") + "</span>"
+    };
+    var ms = App.payMethods(vm);
+    var html = '<div class="pay-opts' + (ms.length > 3 ? " is-4" : "") + '">' + ms.map(function (k) { return opt(k, face[k]); }).join("") + "</div>";
+    if (vm.method === "card") html += '<div class="hosted"><div class="hosted-label">' + ic("lock") + tx("Campos seguros del procesador de pagos · el club nunca ve tu tarjeta", "Payment processor's secure fields · the range never sees your card") + "</div>" +
       pin("holder", tx("Nombre en la tarjeta", "Cardholder name"), vm.card.holder, ' autocomplete="cc-name"') + pin("num", tx("Número de tarjeta", "Card number"), vm.card.num, ' inputmode="numeric" autocomplete="cc-number"') +
       '<div class="pf-row">' + pin("exp", tx("Vence", "Expiry"), vm.card.exp, ' inputmode="numeric" autocomplete="cc-exp" placeholder="MM / AA"') + pin("cvv", "CVV", vm.card.cvv, ' inputmode="numeric" maxlength="4" autocomplete="cc-csc"') + pin("zip", tx("Código postal", "ZIP"), vm.card.zip, ' inputmode="numeric" maxlength="5" autocomplete="postal-code"') + "</div>" +
       '<div class="xs subtle">' + tx("Tarjeta de prueba (sandbox) ya escrita: no se cobra dinero real.", "Sandbox test card already filled in: no real money is charged.") + "</div></div>";
-    if (vm.method === "paypal") html += '<div class="callout">' + ic("info") + "<span>" + tx("Te llevaremos a PayPal para aprobar el pago y volverás aquí. (Sandbox: sin dinero real.)", "We'll take you to PayPal to approve and bring you back. (Sandbox: no real money.)") + "</span></div>";
     if (vm.method === "ath") html += '<div class="hosted">' + pin("athPhone", tx("Móvil registrado en ATH Móvil", "Mobile number registered with ATH Móvil"), vm.athPhone, ' inputmode="tel" autocomplete="tel"') + '<div class="xs subtle row" style="gap:6px;align-items:flex-start">' + ic("phone", "i-xs") + "<span>" + tx("Te enviaremos una solicitud de pago a este número. Tienes hasta 10 minutos para aprobarla.", "We'll send a payment request to this number. You have up to 10 minutes to approve it.") + "</span></div></div>";
-    var locked = vm.method === "ath";
+    if (vm.method === "desk") html += '<div class="callout tenant" data-desk-note>' + ic("desk") + "<span>" + tx("Reservamos tu " + (vm.signup ? "inscripción" : "renovación") + " y pagas en recepción en efectivo o con cheque a nombre de " + App.ten().name + ". " + (vm.signup ? "Tu membresía queda pendiente" : "Tu membresía sigue como está") + " hasta que el personal confirme el pago.", "We reserve your " + (vm.signup ? "sign-up" : "renewal") + " and you pay at the front desk in cash or by check payable to " + App.ten().name + ". " + (vm.signup ? "Your membership stays pending" : "Your membership stays as it is") + " until staff confirm the payment.") + "</span></div>";
+    if (vm.method === "cash") {
+      var chg = Math.max(0, App.num(vm.cashRec) - (vm.amount || 0));
+      html += '<div class="hosted"><div class="pf-row">' + pin("cashRec", tx("Efectivo recibido", "Cash received"), vm.cashRec, ' inputmode="decimal"') + '<div class="pf"><span class="pf-l">' + tx("Cambio", "Change") + '</span><div class="input ro-input" data-change>' + App.money(chg) + "</div></div></div>" +
+        '<div class="xs subtle">' + tx("Total a cobrar: ", "Total due: ") + App.money(vm.amount || 0) + tx(" · el recibo indica efectivo, lo recibido y el cambio.", " · the receipt shows cash, amount received and change.") + "</div></div>";
+    }
+    if (vm.method === "check") html += '<div class="hosted">' + pin("chkNo", tx("Número de cheque", "Check number"), vm.chkNo, ' inputmode="numeric" maxlength="8"') + '<div class="xs subtle">' + tx("A nombre de " + App.ten().name + " por " + App.money(vm.amount || 0) + ". El recibo indica el número de cheque.", "Payable to " + App.ten().name + " for " + App.money(vm.amount || 0) + ". The receipt shows the check number.") + "</div></div>";
+    var locked = vm.method !== "card";
     html += '<div class="optin' + (locked ? " is-locked" : "") + '"><button type="button" class="toggle' + (vm.autorenew && !locked ? " is-on" : "") + (locked ? " is-locked" : "") + '" data-act="autorenew" role="switch" aria-checked="' + (!!vm.autorenew && !locked) + '" ' + (locked ? 'aria-disabled="true"' : "") + ' aria-label="' + tx("Auto-renovación", "Auto-renew") + '"></button><div><div class="optin-title">' + tx("Activar auto-renovación (opcional)", "Turn on auto-renew (optional)") + '</div><div class="optin-text">' +
-      (locked ? ic("lock", "i-xs") + " " + tx("ATH Móvil no permite pagos recurrentes. Elige PayPal o tarjeta para activar la auto-renovación.", "ATH Móvil doesn't support recurring payments. Choose PayPal or card to turn on auto-renew.")
-        : tx("Cobraremos a tu PayPal o tarjeta cada año en la fecha de renovación. Te avisaremos 7 días antes de cada cobro. Cancela cuando quieras desde tu portal.", "We'll charge your PayPal or card each year on the renewal date, with a notice 7 days before each charge. Cancel anytime from your portal.")) + "</div></div></div>";
+      (locked ? ic("lock", "i-xs") + " " + tx("La auto-renovación solo está disponible con tarjeta de crédito/débito.", "Auto-renew is only available with a credit/debit card.")
+        : tx("Cobraremos a tu tarjeta cada año en la fecha de renovación. Te avisaremos 7 días antes de cada cobro. Cancela cuando quieras desde tu portal.", "We'll charge your card each year on the renewal date, with a notice 7 days before each charge. Cancel anytime from your portal.")) + "</div></div></div>";
     return html;
   };
   App.payHandlers = function (vm, rer) {
     return {
-      payMethod: function (el) { vm.method = el.dataset.v; if (vm.method === "ath") vm.autorenew = false; App.keepScroll = true; rer(); },
-      autorenew: function () { if (vm.method === "ath") { App.toast(tx("La auto-renovación requiere PayPal o tarjeta.", "Auto-renew requires PayPal or card."), "warn"); return; } vm.autorenew = !vm.autorenew; App.keepScroll = true; rer(); }
+      payMethod: function (el) { vm.method = el.dataset.v; if (vm.method !== "card") vm.autorenew = false; App.keepScroll = true; rer(); },
+      autorenew: function () { if (vm.method !== "card") { App.toast(tx("La auto-renovación solo está disponible con tarjeta.", "Auto-renew is only available with a card."), "warn"); return; } vm.autorenew = !vm.autorenew; App.keepScroll = true; rer(); }
     };
   };
-  /* PayPal (sandbox) approval sheet + card processing, both simulated */
+  /* Card processing (simulated) and staff-recorded cash / check (immediate) */
   App.simulatePay = function (vm, amount, who, done) {
-    if (vm.method === "paypal") {
-      App.modal({ sticky: true, render: function () {
-        return '<div class="pp-sheet"><div class="pp-top"><span class="wm wm-paypal" style="font-size:22px">Pay<b>Pal</b></span><span class="badge badge--neutral">Sandbox</span></div>' +
-          '<div class="pp-body"><div class="small muted">' + tx("Pagar a", "Pay to") + "</div><div style=\"font-weight:700;font-size:17px\">" + App.ten().name + '</div><div class="pp-amt">' + App.money(amount) + ' USD</div><label class="pf" style="margin:10px 0 4px"><span class="pf-l">' + tx("Email de PayPal", "PayPal email") + '</span><input class="input" data-pay="ppEmail" value="' + App.esc(vm.ppEmail != null ? vm.ppEmail : who.email) + '" inputmode="email" autocomplete="email"></label><div class="kv"><span class="k">' + tx("Fuente", "Funding") + '</span><span class="v">' + tx("Saldo de PayPal (prueba)", "PayPal balance (test)") + "</span></div>" +
-          '<button type="button" class="btn btn-xl btn-block pp-btn" data-act="ppApprove">' + tx("Aceptar y pagar", "Agree & pay") + '</button><button type="button" class="btn btn-ghost btn-block" data-act="ppCancel">' + tx("Cancelar y volver", "Cancel and return") + "</button>" +
-          '<div class="xs subtle" style="text-align:center">' + tx("Simulación de PayPal sandbox: no se mueve dinero real.", "Simulated PayPal sandbox: no real money moves.") + "</div></div></div>";
-      } });
-      App.handlers.ppApprove = function () { App.modalDef.render = spinner(tx("Confirmando con PayPal…", "Confirming with PayPal…")); App.renderModal(); setTimeout(function () { App.closeModal(); done(); }, 900); };
-      App.handlers.ppCancel = function () { App.closeModal(); };
-    } else {
-      App.modal({ sticky: true, render: spinner(tx("Procesando el pago seguro…", "Processing secure payment…")) });
-      setTimeout(function () { App.closeModal(); done(); }, 1100);
-    }
+    var msg = vm.method === "cash" || vm.method === "check" ? tx("Registrando el pago…", "Recording the payment…") : tx("Procesando el pago seguro…", "Processing secure payment…");
+    App.modal({ sticky: true, render: spinner(msg) });
+    setTimeout(function () { App.closeModal(); done(); }, vm.method === "card" ? 1100 : 600);
   };
   function spinner(msg) { return function () { return '<div class="proc"><span class="spin"></span><div style="font-weight:650">' + msg + "</div></div>"; }; }
   App.spinner = spinner;
@@ -785,7 +873,7 @@
     if (left <= 0 && !c.expired) { c.expired = true; App.athStop(); if (c.onExpire) c.onExpire(); }
   };
   App.athView = function (o) {
-    if (o.expired) return '<div class="ath-wrap"><div class="ok-badge" style="background:var(--warn-600);box-shadow:0 0 0 10px var(--warn-50)">' + ic("clock") + '</div><h2 style="text-align:center">' + tx("La solicitud de ATH Móvil expiró", "The ATH Móvil request expired") + '</h2><p class="muted" style="text-align:center">' + tx("No se hizo ningún cobro. Puedes intentarlo otra vez o elegir PayPal o tarjeta.", "Nothing was charged. Try again or choose PayPal or card.") + '</p><button type="button" class="btn btn-primary btn-lg btn-block" data-act="athRetry">' + ic("renew", "i-sm") + tx("Enviar otra solicitud", "Send a new request") + '</button><button type="button" class="btn btn-ghost btn-block" data-act="athCancel">' + tx("Elegir otro método", "Choose another method") + "</button></div>";
+    if (o.expired) return '<div class="ath-wrap"><div class="ok-badge" style="background:var(--warn-600);box-shadow:0 0 0 10px var(--warn-50)">' + ic("clock") + '</div><h2 style="text-align:center">' + tx("La solicitud de ATH Móvil expiró", "The ATH Móvil request expired") + '</h2><p class="muted" style="text-align:center">' + tx("No se hizo ningún cobro. Puedes intentarlo otra vez o elegir otro método.", "Nothing was charged. Try again or choose another method.") + '</p><button type="button" class="btn btn-primary btn-lg btn-block" data-act="athRetry">' + ic("renew", "i-sm") + tx("Enviar otra solicitud", "Send a new request") + '</button><button type="button" class="btn btn-ghost btn-block" data-act="athCancel">' + tx("Elegir otro método", "Choose another method") + "</button></div>";
     return '<div class="ath-wrap">' +
       '<div style="text-align:center"><span class="pulse"><span class="dot"></span>' + tx("Esperando tu aprobación", "Waiting for your approval") + "</span></div>" +
       '<h2 style="text-align:center;font-size:22px;line-height:28px">' + tx("Aprueba en ATH Móvil", "Approve in ATH Móvil") + "</h2>" +

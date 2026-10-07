@@ -1,5 +1,5 @@
 /* Front desk check-in: search / scan, live check-in rule, one-tap fixes (renew, waiver, orientation, call owner),
-   desk renewal (card · PayPal · ATH Móvil with countdown · send link), guests, success state. */
+   desk renewal (card · ATH Móvil with countdown · cash · check · send link; "Cobrar" completes a pay-at-desk reservation), guests, success state. */
 (function () {
   var tx = App.tx, ic = App.ic, vm = App.vm;
   var KIND_IC = { ok: "check-circle", warn: "clock", bad: "x-circle", req: "alert", ban: "ban" };
@@ -74,7 +74,8 @@
       ? '<div class="res-foot"><span class="small subtle grow">' + tx("Visita registrada con hora, personal e invitados.", "Visit logged with time, staff and guests.") + (inToday.at > Date.now() - 600000 ? ' <button type="button" class="linklike" data-act="simTime">' + tx("Demo: simular 1 h 45 min en el club", "Demo: simulate 1 h 45 min on site") + "</button>" : "") + '</span><button type="button" class="btn btn-secondary btn-lg" data-act="companion">' + ic("user-plus", "i-sm") + tx("Invitado (no dispara)", "Guest (no shooting)") + '</button><button type="button" class="btn btn-secondary btn-lg" data-act="next">' + ic("arrow-right", "i-sm") + tx("Siguiente", "Next") + '</button><button type="button" class="btn btn-primary btn-lg" data-act="doCheckout">' + ic("log-out", "i-sm") + tx("Registrar salida", "Check out") + "</button></div>"
       : '<div class="res-foot">' + (E.can ? laneSel : "") + '<span class="grow"></span>' + (E.can || E.lic.blocked ? "" : '<a class="small nowrap" href="#" data-act="override" style="color:var(--n-600)">' + tx("Permitir con autorización del dueño", "Allow with owner approval") + "</a>") +
         '<button type="button" class="btn btn-secondary btn-lg" data-act="companion"' + (E.can ? "" : " disabled") + ">" + ic("user-plus", "i-sm") + tx("Invitado (no dispara)", "Guest (no shooting)") + '</button><button type="button" class="btn btn-secondary btn-lg" data-act="guest"' + (E.can ? "" : " disabled") + ">" + ic("target", "i-sm") + tx("Invitado que dispara", "Shooting guest") + '</button><button type="button" class="btn btn-lg ' + (E.can ? "btn-success" : "is-disabled") + '" data-act="doCheckin"' + (E.can ? "" : " disabled") + ">" + ic("login", "i-sm") + tx("Registrar entrada", "Check in") + "</button></div>";
-    return head + '<div class="res-body">' + hero + checks + blockers + guests + info + "</div>" + foot;
+    var rc = just && vm.done.receipt ? '<div class="callout ok" data-receipt>' + ic("receipt") + "<span><strong>" + tx("Recibo ", "Receipt ") + vm.done.receipt + "</strong> · " + App.money(vm.done.amount) + " · " + App.payLine(vm.done.method, vm.done.pay) + " · " + tx("activa hasta el ", "active through ") + App.fd(vm.done.exp) + "</span></div>" : "";
+    return head + '<div class="res-body">' + hero + rc + checks + blockers + guests + info + "</div>" + foot;
   }
 
   function render() {
@@ -95,29 +96,32 @@
 
   /* ----- desk renewal modal */
   var R = {};
-  function renewModal() {
-    var c = cur(), m = c.m, p = App.primary(m, c.list), t = App.ten(), tr = t.tiers[p.tier], st = App.status(p, c.list);
+  function renewModal(collect) {
+    var c = cur(), m = c.m, p = App.primary(m, c.list), t = App.ten(), st = App.status(p, c.list), PP = collect === true ? p.payPending : null;
+    var tr = t.tiers[PP ? PP.tier : p.tier];
     var from = (st === "active" || st === "grace") && p.expires ? p.expires : App.TODAY, exp = tr.term === "month" ? App.addMonths(from, 1) : App.addMonths(from, 12);
-    R = { method: "card", autorenew: false, phone: p.phone, stage: "pay", andCheckin: true, pid: p.id, amount: tr.price, exp: exp };
+    R = { desk: true, collect: !!PP, method: PP ? "cash" : "card", autorenew: false, phone: p.phone, stage: "pay", andCheckin: true, pid: p.id, amount: tr.price, exp: exp };
     App.modal({ wide: true, sticky: true, render: function () {
       var hh = App.household(p, c.list);
       if (R.stage === "ath") return '<div class="modal-head"><h2>' + tx("Cobro con ATH Móvil", "ATH Móvil payment") + '</h2></div><div class="modal-body">' + App.athView({ amount: R.amount, phone: R.athPhone || R.phone, expired: R.expired }) + "</div>";
-      return '<div class="modal-head"><h2>' + (m.hh ? tx("Renovar hogar", "Renew household") : tx("Renovar membresía", "Renew membership")) + " · " + p.name + '</h2><button type="button" class="icon-btn" data-act="closeModal" aria-label="' + tx("Cerrar", "Close") + '">' + ic("x") + "</button></div>" +
-        '<div class="modal-body"><div class="m-card m-card-pad stack-2" style="border:1px solid var(--border)"><div class="kv"><span class="k">' + tx("Plan", "Plan") + '</span><span class="v">' + App.tierName(p.tier) + '</span></div><div class="kv"><span class="k">' + tx("Cubre", "Covers") + '</span><span class="v">' + hh.length + (hh.length === 1 ? tx(" persona", " person") : tx(" adultos del hogar", " household adults")) + '</span></div><div class="kv"><span class="k">' + tx("Nueva fecha de vencimiento", "New expiry date") + '</span><span class="v">' + App.fd(exp) + '</span></div><div class="total-row"><span>' + tx("Total", "Total") + "</span><span>" + App.money(tr.price) + "</span></div></div>" +
+      return '<div class="modal-head"><h2>' + (PP ? tx("Cobrar pago pendiente", "Collect pending payment") : m.hh ? tx("Renovar hogar", "Renew household") : tx("Renovar membresía", "Renew membership")) + " · " + p.name + '</h2><button type="button" class="icon-btn" data-act="closeModal" aria-label="' + tx("Cerrar", "Close") + '">' + ic("x") + "</button></div>" +
+        '<div class="modal-body">' + (PP ? '<div class="callout warn" data-collect>' + ic("hourglass") + "<span>" + tx((PP.kind === "signup" ? "Inscripción" : "Renovación") + " reservada en línea el " + App.fds(PP.on, "es") + " para pagar en recepción · fecha límite " + App.fd(PP.due, "es") + ".", (PP.kind === "signup" ? "Sign-up" : "Renewal") + " reserved online on " + App.fds(PP.on, "en") + " to pay at the desk · due " + App.fd(PP.due, "en") + ".") + "</span></div>" : "") + '<div class="m-card m-card-pad stack-2" style="border:1px solid var(--border)"><div class="kv"><span class="k">' + tx("Plan", "Plan") + '</span><span class="v">' + App.tierName(PP ? PP.tier : p.tier) + '</span></div><div class="kv"><span class="k">' + tx("Cubre", "Covers") + '</span><span class="v">' + hh.length + (hh.length === 1 ? tx(" persona", " person") : tx(" adultos del hogar", " household adults")) + '</span></div><div class="kv"><span class="k">' + tx("Nueva fecha de vencimiento", "New expiry date") + '</span><span class="v">' + App.fd(exp) + '</span></div><div class="total-row"><span>' + tx("Total", "Total") + "</span><span>" + App.money(tr.price) + "</span></div></div>" +
         '<div class="label">' + tx("Método de pago", "Payment method") + "</div>" + App.payPicker(R, { name: p.name, email: p.email, phone: p.phone }) +
         '<label class="check"><input type="checkbox" data-act="andCheckin"' + (R.andCheckin ? " checked" : "") + '><span class="check-box">' + ic("check", "i-xs") + "</span><span>" + tx("Registrar la entrada de " + App.first(m.name) + " al completar el pago", "Check " + App.first(m.name) + " in when payment completes") + "</span></label></div>" +
-        '<div class="modal-foot"><button type="button" class="btn btn-ghost" data-act="sendLink">' + ic("sms", "i-sm") + tx("Enviar enlace por texto", "Text a renewal link") + '</button><span class="grow"></span><button type="button" class="btn btn-primary btn-lg" data-act="charge">' + (R.method === "ath" ? tx("Enviar solicitud de ", "Send request for ") : tx("Cobrar ", "Charge ")) + App.money(tr.price) + "</button></div>";
+        '<div class="modal-foot"><button type="button" class="btn btn-ghost" data-act="sendLink">' + ic("sms", "i-sm") + tx("Enviar enlace por texto", "Text a renewal link") + '</button><span class="grow"></span><button type="button" class="btn btn-primary btn-lg" data-act="charge">' + (R.method === "ath" ? tx("Enviar solicitud de ", "Send request for ") : R.method === "cash" ? tx("Registrar efectivo · ", "Record cash · ") : R.method === "check" ? tx("Registrar cheque · ", "Record check · ") : tx("Cobrar ", "Charge ")) + App.money(tr.price) + "</button></div>";
     }, onClose: function () { App.athStop(); } });
   }
   function finishRenew() {
     var c = cur(), m = c.m;
-    var res = App.renew(m.id, { method: R.method, autorenew: R.autorenew, src: "desk" });
+    var pay = App.payInfo(R, R.amount);
+    var res = R.collect ? App.collectPending(m.id, R.method, pay, R.autorenew) : App.renew(m.id, { method: R.method, pay: pay, autorenew: R.autorenew, src: "desk" });
     App.athStop(); App.modalDef = null; App.renderModal();
     var did = false;
     if (R.andCheckin) { var E = App.evaluate(App.member(m.id), App.members()); if (E.can) { App.checkin(m.id, vm.guests, "desk", vm.cal || App.calFor(m)); did = true; vm.guests = []; } }
-    vm.done = { id: m.id, renewed: true };
+    vm.done = { id: m.id, renewed: true, receipt: res.receipt, method: res.method, pay: res.pay, amount: res.amount, exp: res.exp };
     App.rerender();
-    App.toast(did ? tx("Renovada hasta el " + App.fd(res.exp, "es") + " · entrada registrada", "Renewed until " + App.fd(res.exp, "en") + " · checked in") : tx("Renovada hasta el " + App.fd(res.exp, "es") + " · recibo enviado", "Renewed until " + App.fd(res.exp, "en") + " · receipt sent"));
+    var pl = " · " + App.payLine(res.method, res.pay);
+    App.toast(did ? tx("Renovada hasta el " + App.fd(res.exp, "es") + pl + " · entrada registrada", "Renewed until " + App.fd(res.exp, "en") + pl + " · checked in") : tx("Renovada hasta el " + App.fd(res.exp, "es") + pl + " · recibo enviado", "Renewed until " + App.fd(res.exp, "en") + pl + " · receipt sent"));
   }
 
   App.page({
@@ -211,14 +215,13 @@
         App.handlers.gPass = function (el) { grab(); G.pass = el.dataset.v === "1"; App.renderModal(); };
         App.handlers.gAdd = function () { grab(); G.err = G.name.split(/\s+/).length < 2 ? tx("Escribe nombre y apellido.", "Enter first and last name.") : !/^[A-Za-z0-9-]{6,}$/.test(G.lic) ? tx("Escribe el número de licencia del invitado.", "Enter the guest's license number.") : !G.cal ? tx("Escribe el calibre.", "Enter the caliber.") : ""; if (G.err) { App.renderModal(); return; } vm.guests.push({ kind: "guest", name: G.name, pass: G.pass, lic: G.lic.toUpperCase(), cal: G.cal }); App.closeModal(); App.rerender(); };
       },
-      fixRenew: renewModal,
+      fixRenew: function () { renewModal(false); },
+      fixCollect: function () { renewModal(true); },
       andCheckin: function (el) { R.andCheckin = el.checked; },
       charge: function () {
         var c = cur(), pe = App.payCheck(R); if (pe) { App.toast(pe, "warn"); return; }
         if (R.method === "ath") { R.stage = "ath"; R.expired = false; App.renderModal(); App.athStart({ onExpire: function () { R.expired = true; App.renderModal(); } }); App.athTick(); return; }
-        var keep = App.modalDef;
         App.simulatePay(R, R.amount, App.primary(c.m, c.list), finishRenew);
-        App.handlers.ppCancel = function () { App.modal(keep); };
       },
       athApprove: function () { App.modalDef.render = App.spinner(tx("ATH Móvil aprobado · confirmando…", "ATH Móvil approved · confirming…")); App.renderModal(); App.athStop(); setTimeout(finishRenew, 800); },
       athOpen: function () { App.toast(tx("La solicitud llegó al teléfono del miembro.", "The request arrived on the member's phone.")); },
@@ -260,6 +263,6 @@
     }, App.payHandlers(R, function () { App.renderModal(); }))
   });
   // payHandlers captured the initial R object; keep them pointed at the live one
-  App.handlers.payMethod = function (el) { R.method = el.dataset.v; if (R.method === "ath") R.autorenew = false; App.renderModal(); };
-  App.handlers.autorenew = function () { if (R.method === "ath") { App.toast(tx("La auto-renovación requiere PayPal o tarjeta.", "Auto-renew requires PayPal or card."), "warn"); return; } R.autorenew = !R.autorenew; App.renderModal(); };
+  App.handlers.payMethod = function (el) { R.method = el.dataset.v; if (R.method !== "card") R.autorenew = false; App.renderModal(); };
+  App.handlers.autorenew = function () { if (R.method !== "card") { App.toast(tx("La auto-renovación solo está disponible con tarjeta.", "Auto-renew is only available with a card."), "warn"); return; } R.autorenew = !R.autorenew; App.renderModal(); };
 })();
