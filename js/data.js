@@ -13,9 +13,31 @@ window.RC_DATA = {
     waiver: { v: 4, date: "2026-09-01" }, grace: 7, checkinInGrace: true, orientationRequired: true, minAge: 21,
     guestFee: 15, maxGuests: 2,
     linkMember: "GGC-10482", portalMember: "GGC-10482",
-    deskDemo: ["GGC-10391", "GGC-10288", "GGC-10512"], // cleared · lapsed · missing waiver (demo script order)
+    deskDemo: ["GGC-10391", "GGC-10288", "GGC-10512", "GGC-10484"], // cleared · lapsed · old waiver · expired gun license = refused (demo script order)
+    close: "18:00",
+    licBase: { soon6: 186, soon30: 41, expired: 12 }, // club totals (the sample members below are a subset)
+    licExp: { "GGC-10521": "2027-04-05", "GGC-10498": "2027-01-05", "GGC-10233": "2026-12-06", "GGC-10655": "2026-11-06", "GGC-10444": "2026-10-14", "GGC-10366": "2026-10-07",
+      "GGC-10561": "2027-02-04", "GGC-10402": "2026-10-21", "GGC-10484": "2026-09-30", "GGC-10483": "2026-09-12", "GGC-10389": "2026-08-08", "GGC-10377": "2026-06-09", "GGC-10455": "2026-05-10" },
+    licSt: { "GGC-10289": "suspended", "GGC-10290": "revoked" },
+    licToday: "GGC-10366", // license expires today: warning only
+    companionSeed: [{ host: "GGC-10655", name: "Yolanda Ortiz Rivera", inAgo: 105 }], // non-shooting guest on site // court-ordered suspension / revocation examples (always blocked)
+    /* visits already in the log when the demo starts (minutes before the demo state was created) */
+    visitSeed: [
+      { id: "GGC-10655", inAgo: 112 }, { id: "GGC-10233", inAgo: 58, kiosk: true }, { id: "GGC-10498", inAgo: 24 },
+      { id: "GGC-10521", inAgo: 250, outAgo: 175 }, { id: "GGC-10444", inAgo: 205, outAgo: 140, kiosk: true }, { id: "GGC-10366", inAgo: 190, outAgo: 96 }
+    ],
     kioskDemo: ["GGC-10391", "GGC-10734", "GGC-10512", "GGC-10288"],
     newIds: ["GGC-10901", "GGC-10902", "GGC-10903", "GGC-10904", "GGC-10905", "GGC-10906"],
+    /* Demo prefills: every input in the prototype starts filled with this club's sample data (all fictional). */
+    demo: {
+      signup: { name: "Valeria Ortiz Santiago", dob: "22/04/1994", phone: "(787) 555-0190", email: "valeria.ortiz@example.com",
+        town: "Guayama", zip: "00784", licNo: "LA-DEMO-731905", licExp: "15/03/2029", emer: "Luis Ortiz Rivera · (787) 555-0191",
+        adult: { name: "Marcos Rivera Cruz", dob: "08/12/1990" } },
+      underage: "09/05/2006",
+      card: { num: "4111 1111 1111 1111", exp: "12 / 29", cvv: "123" },
+      desk: "Raúl Pagán", guest: "Carlos Méndez Ruiz", guest2: "Ana Méndez Ruiz", companion: "Elena Soto Pagán", companion2: "Tomás Rivera Soto", guestLic: "LA-DEMO-583104", guestCal: "9mm",
+      profile: { town: "Guayama", zip: "00784", emer: "Lourdes Colón Ortiz · (939) 555-0181" }
+    },
     receiptBase: 4817,
     tiers: {
       ind: { es: "Individual anual", en: "Individual annual", price: 240, term: "year", hh: 1, passes: 4 },
@@ -69,9 +91,29 @@ window.RC_DATA = {
     waiver: { v: 3, date: "2026-08-15" }, grace: 7, checkinInGrace: true, orientationRequired: true, minAge: 21,
     guestFee: 12, maxGuests: 2,
     linkMember: "CTS-20317", portalMember: "CTS-20317",
-    deskDemo: ["CTS-20144", "CTS-20093", "CTS-20371"],
+    deskDemo: ["CTS-20144", "CTS-20093", "CTS-20371", "CTS-20319"],
+    close: "17:00",
+    licBase: { soon6: 97, soon30: 22, expired: 7 },
+    licExp: { "CTS-20377": "2027-04-05", "CTS-20219": "2027-01-05", "CTS-20266": "2026-12-06", "CTS-20299": "2026-11-06", "CTS-20455": "2026-10-14", "CTS-20267": "2026-10-07",
+      "CTS-20345": "2027-02-04", "CTS-20402": "2026-10-21", "CTS-20319": "2026-09-30", "CTS-20318": "2026-09-12", "CTS-20410": "2026-08-08", "CTS-20433": "2026-06-09", "CTS-20094": "2026-05-10" },
+    licSt: { "CTS-20095": "suspended" },
+    licToday: "CTS-20267",
+    companionSeed: [{ host: "CTS-20219", name: "Damaris Colón Pérez", inAgo: 98 }],
+    visitSeed: [
+      { id: "CTS-20219", inAgo: 104 }, { id: "CTS-20266", inAgo: 47, kiosk: true }, { id: "CTS-20377", inAgo: 18 },
+      { id: "CTS-20455", inAgo: 230, outAgo: 160 }, { id: "CTS-20299", inAgo: 200, outAgo: 120, kiosk: true }, { id: "CTS-20267", inAgo: 180, outAgo: 90 }
+    ],
     kioskDemo: ["CTS-20144", "CTS-20488", "CTS-20371", "CTS-20093"],
     newIds: ["CTS-20901", "CTS-20902", "CTS-20903", "CTS-20904", "CTS-20905", "CTS-20906"],
+    demo: {
+      signup: { name: "Gerardo Colón Ríos", dob: "03/11/1989", phone: "(787) 555-0290", email: "gerardo.colon@example.com",
+        town: "Salinas", zip: "00751", licNo: "LA-DEMO-662417", licExp: "02/08/2028", emer: "Ivette Ríos Báez · (939) 555-0291",
+        adult: { name: "Ivette Ríos Báez", dob: "17/06/1991" } },
+      underage: "09/05/2006",
+      card: { num: "4111 1111 1111 1111", exp: "12 / 29", cvv: "123" },
+      desk: "Luis Vélez", guest: "Héctor Rivera Ortiz", guest2: "Mayra Ortiz Lugo", companion: "Gladys Vélez Ríos", companion2: "Ismael Ortiz Lugo", guestLic: "LA-DEMO-647218", guestCal: ".22 LR",
+      profile: { town: "Salinas", zip: "00751", emer: "Wanda Ramos Ortiz · (787) 555-0318" }
+    },
     receiptBase: 1932,
     tiers: {
       ind: { es: "Socio anual", en: "Member annual", price: 210, term: "year", hh: 1, passes: 4 },
@@ -117,3 +159,17 @@ window.RC_DATA = {
     ]
   }
 };
+
+/* Licencia de Armas (PR weapons license) for every member: clearly fictional "LA-DEMO-" numbers.
+   Default expiry is comfortably valid (> 6 months); licExp overrides seed every reminder/band case. */
+(function () {
+  ["guayama", "salinas"].forEach(function (k) {
+    var t = window.RC_DATA[k];
+    t.members.forEach(function (m) {
+      var h = 0; for (var i = 0; i < m.id.length; i++) h = (h * 131 + m.id.charCodeAt(i)) % 999983;
+      var d = new Date(Date.UTC(2026, 9, 7)); d.setUTCDate(d.getUTCDate() + 240 + (h % 1100));
+      m.lic = { no: "LA-DEMO-" + String(100000 + ((h * 7919) % 900000)), exp: t.licExp[m.id] || d.toISOString().slice(0, 10) };
+      if (t.licSt && t.licSt[m.id]) m.lic.st = t.licSt[m.id];
+    });
+  });
+})();

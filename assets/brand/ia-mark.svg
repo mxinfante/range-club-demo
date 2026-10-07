@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64.0 64.0" width="64.0" height="64.0" role="img" aria-label="IA">
+  <title>IA</title>
+  <rect x="0" y="0" width="64" height="64" rx="12" fill="#0D366B"/>
+  <circle cx="14" cy="16.5" r="3.9" fill="#1BAF7A"/>
+  <rect x="10.5" y="24" width="7" height="27" rx="3.5" fill="#FFFFFF"/>
+  <path d="M26.5 48.5 L38 19.5 L49.5 48.5" fill="none" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="26" y="37" width="24" height="6" rx="3" fill="#FFFFFF"/>
+</svg>

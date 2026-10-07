@@ -46,19 +46,19 @@
       '<div class="kv"><span class="k">' + tx("Renueva hasta", "Renews through") + '</span><span class="v" style="color:var(--ok-700)">' + App.fd(exp) + "</span></div></div>" +
       (c.hh.length > 1 ? '<div class="hh-box"><div class="eyebrow" style="margin-bottom:8px">' + tx("Hogar cubierto · ", "Household covered · ") + c.hh.length + tx(" de ", " of ") + t.tiers[p.tier].hh + '</div><div class="hh-list">' + hh + "</div></div>" : "") + "</div>" +
       '<div><div class="m-section-title">' + tx("Plan", "Plan") + '</div><div class="help" style="margin:2px 0 10px">' + tx("El cambio de plan aplica a partir de esta renovación.", "A plan change takes effect with this renewal.") + '</div><div class="stack-2">' + plans + "</div></div>" +
-      '<div><div class="m-section-title" style="margin-bottom:10px">' + tx("Método de pago", "Payment method") + '</div><div class="stack-3">' + App.payPicker(vm) + "</div></div>" +
+      '<div><div class="m-section-title" style="margin-bottom:10px">' + tx("Método de pago", "Payment method") + '</div><div class="stack-3">' + App.payPicker(vm, { name: p.name, email: p.email, phone: p.phone }) + "</div></div>" +
       '<div class="m-card m-card-pad"><div class="kv"><span class="k">' + App.tierName(vm.tier) + '</span><span class="v">' + App.money(tr.price) + '</span></div><div class="total-row"><span>' + tx("Total hoy", "Total today") + "</span><span>" + App.money(tr.price) + "</span></div></div>" +
       '<button type="button" class="btn btn-tenant btn-xl btn-block" data-act="pay">' + (vm.method === "ath" ? '<span class="wm wm-ath" style="color:#fff">ATH</span>' + tx("Pagar con ATH Móvil · ", "Pay with ATH Móvil · ") : vm.method === "paypal" ? tx("Continuar a PayPal · ", "Continue to PayPal · ") : ic("lock", "i-sm") + tx("Pagar ", "Pay ")) + App.money(tr.price, false) + "</button>" +
       '<div class="secure-note">' + ic("shield") + "<span>" + tx("Enlace seguro de un solo uso, válido 14 días. Pagos procesados por PayPal o ATH Móvil; el club nunca ve tu tarjeta.", "Secure single-use link, valid 14 days. Payments are processed by PayPal or ATH Móvil; the range never sees your card.") + "</span></div></div>";
-    return shell(body, tx("Elige <strong>ATH Móvil</strong> para mostrar la espera con cuenta regresiva, o <strong>PayPal/tarjeta</strong> para confirmar al instante. La auto-renovación solo se activa con PayPal o tarjeta.", "Choose <strong>ATH Móvil</strong> to show the countdown wait, or <strong>PayPal/card</strong> to confirm instantly. Auto-renew only works with PayPal or card."));
+    return shell(body, tx("Todo viene lleno: datos del miembro, tarjeta de prueba, email de PayPal y móvil de ATH Móvil. Elige <strong>ATH Móvil</strong> para mostrar la espera con cuenta regresiva, o <strong>PayPal/tarjeta</strong> para confirmar al instante. La auto-renovación (apagada por defecto) solo se activa con PayPal o tarjeta.", "Everything is prefilled: member details, test card, PayPal email and ATH Móvil number. Choose <strong>ATH Móvil</strong> to show the countdown wait, or <strong>PayPal/card</strong> to confirm instantly. Auto-renew (off by default) only works with PayPal or card."));
   }
   function ath(c) {
-    return shell('<div class="m-content" style="padding-top:22px">' + App.athView({ amount: App.ten().tiers[vm.tier].price, phone: vm.phone, expired: vm.expired }) + "</div>",
+    return shell('<div class="m-content" style="padding-top:22px">' + App.athView({ amount: App.ten().tiers[vm.tier].price, phone: vm.athPhone || vm.phone, expired: vm.expired }) + "</div>",
       tx("La cuenta regresiva es real (10 minutos). Toca <strong>«Demo: simular aprobación»</strong> para continuar como si el miembro aprobara en su app.", "The countdown is real (10 minutes). Tap <strong>“Demo: simulate approval”</strong> to continue as if the member approved in their app."), tx("Pago con ATH Móvil", "ATH Móvil payment"));
   }
   function done(c) {
     var p = c.p, r = vm.res, t = App.ten();
-    var paid = vm.method === "card" ? "Visa •••• 4242" : vm.method === "paypal" ? "PayPal · " + p.email : "ATH Móvil · " + App.mask(p.phone);
+    var paid = vm.method === "card" ? "Visa •••• " + String((vm.card && vm.card.num) || "").replace(/\D/g, "").slice(-4) : vm.method === "paypal" ? "PayPal · " + p.email : "ATH Móvil · " + App.mask(vm.athPhone || p.phone);
     var body = '<div class="m-content" style="padding-top:28px"><div style="text-align:center" class="stack-3"><div class="ok-badge">' + ic("check") + '</div><h1 style="font-size:26px;line-height:32px;margin-top:18px">' + tx("¡Listo, ", "You're renewed, ") + App.first(p.name) + '!</h1><p class="muted" style="font-size:15px;line-height:22px">' + tx("Tu membresía está activa hasta el ", "Your membership is active through ") + '<strong style="color:var(--n-900)">' + App.fd(r.exp) + "</strong>.</p></div>" +
       '<a class="mini-card plain" href="card.html?m=' + p.id + '"><div class="qr"><img src="' + App.qr(p.id) + '" alt="' + tx("Código QR", "QR code") + '"></div><div class="grow" style="position:relative"><div class="row" style="gap:6px;margin-bottom:6px"><svg style="width:20px;height:20px">' + App.mark(true) + '</svg><span style="font-size:12px;font-weight:600;opacity:.9">' + t.name + '</span></div><div style="font-weight:700;font-size:16px;line-height:20px">' + p.name + '</div><div style="font-size:12.5px;opacity:.88">' + App.tierName(p.tier) + '</div><div style="margin-top:8px"><span class="badge" style="background:rgba(255,255,255,.95);color:var(--ok-700)">' + ic("check-circle") + tx("Activa", "Active") + " · " + App.fds(r.exp) + "</span></div></div></a>" +
       '<div class="callout ok">' + ic("check-circle") + "<span>" + tx("Tu tarjeta digital ya está actualizada. Recepción verá tu nuevo estado en tu próxima visita.", "Your digital card is already updated. The front desk will see your new status on your next visit.") + "</span></div>" +
@@ -90,7 +90,7 @@
     handlers: Object.assign(App.payHandlers(vm, App.rerender), {
       tier: function (el) { if (el.disabled) return; vm.tier = el.dataset.v; App.keepScroll = true; App.rerender(); },
       pay: function () {
-        var c = ctx();
+        var c = ctx(), pe = App.payCheck(vm); if (pe) { App.toast(pe, "warn"); return; }
         if (vm.method === "ath") { vm.view = "ath"; App.rerender(); var sc = document.getElementById("screen"); if (sc) sc.scrollTop = 0; window.scrollTo(0, 0); startAth(); return; }
         App.simulatePay(vm, App.ten().tiers[vm.tier].price, c.p, complete);
       },

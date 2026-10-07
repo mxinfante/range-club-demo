@@ -4,7 +4,7 @@
   var n = function (x) { return Math.round(x).toLocaleString("en-US"); };
 
   function feed() {
-    var ev = App.ts().events.filter(function (e) { return e.type === "renewal" || e.type === "checkin" || e.type === "signup" || e.type === "waiver"; });
+    var ev = App.ts().events.filter(function (e) { return e.type === "renewal" || e.type === "checkin" || e.type === "checkout" || e.type === "signup" || e.type === "waiver"; });
     if (!ev.length) return "";
     var all = App.ts().events, nR = all.filter(function (e) { return e.type === "renewal"; }), nS = all.filter(function (e) { return e.type === "signup"; }).length, nC = all.filter(function (e) { return e.type === "checkin"; }).length;
     var amt = nR.reduce(function (a, e) { return a + e.amount; }, 0) + all.filter(function (e) { return e.type === "signup"; }).reduce(function (a, e) { return a + e.amount; }, 0);
@@ -12,11 +12,30 @@
     var rows = ev.slice().reverse().slice(0, 4).map(function (e) {
       var what = e.type === "renewal" ? ic("renew", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("renovó", "renewed") + " · " + money(e.amount, false) + " · " + ({ link: tx("enlace", "link"), desk: tx("recepción", "desk"), portal: "portal" }[e.src] || e.src) + " · " + ({ paypal: "PayPal", card: tx("tarjeta", "card"), ath: "ATH Móvil" }[e.method] || "") + "</span>"
         : e.type === "checkin" ? ic("login", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("registró entrada", "checked in") + (e.where === "kiosk" ? tx(" (quiosco)", " (kiosk)") : "") + (e.guests && e.guests.length ? " +" + e.guests.length + tx(" invitado(s)", " guest(s)") : "") + "</span>"
+        : e.type === "checkout" ? ic("log-out", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + (e.forced ? tx("salida forzada por ", "forced check-out by ") + App.esc(e.by) : tx("registró salida", "checked out") + (e.where === "kiosk" ? tx(" (quiosco)", " (kiosk)") : "")) + " · " + App.dur(e.dur) + "</span>"
         : e.type === "signup" ? ic("user-plus", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("se inscribió", "signed up") + " · " + money(e.amount, false) + "</span>"
         : ic("waiver", "i-sm") + "<span><strong>" + App.esc(e.name) + "</strong> " + tx("firmó el relevo v", "signed waiver v") + App.ten().waiver.v + "</span>";
       return '<li><span class="feed-t">' + App.time(e.at) + "</span>" + what + "</li>";
     }).join("");
     return '<section class="card live"><div class="card-header"><div class="row"><span class="live-dot"></span><h2>' + tx("En vivo en esta demo", "Live in this demo") + '</h2></div><span class="live-sum">' + sum + '</span></div><ul class="feed">' + rows + "</ul></section>";
+  }
+
+  /* who's on site right now (open visits) + end-of-day state */
+  function onSite() {
+    var t = App.ten(), c = App.closeState(), open = c.open.slice().sort(function (a, b) { return a.in - b.in; }), list = App.members();
+    var rows = open.map(function (v) {
+      var m = App.member(v.mid, list) || { name: v.name, av: "av-3" }, g = !!v.host;
+      return '<li class="os-row' + (g ? " is-guest" : "") + '"><div class="avatar avatar-sm ' + (m.av || "av-1") + '">' + App.ini(v.name) + '</div><div class="grow" style="min-width:0"><a class="plain nm truncate" href="checkin.html?m=' + (v.host || v.mid) + '">' + App.esc(v.name) + "</a>" + (g ? '<div class="os-g">' + App.guestBadge(v) + '<span class="xs subtle truncate">' + tx("con ", "with ") + App.esc(App.first(v.hostName || "")) + "</span></div>" : "") + '<div class="xs subtle">' + tx("Entrada ", "In ") + App.time(v.in) + (v.inBy === "kiosk" ? tx(" · quiosco", " · kiosk") : "") + '</div></div><div class="os-el"><strong data-since="' + v.in + '">' + App.dur(Date.now() - v.in) + '</strong><span class="xs subtle">' + (v.type === "companion" ? tx("No dispara", "No shooting") : tx("Calibre ", "Caliber ") + App.esc(v.cal || "—")) + "</span></div>" + (c.on ? '<button type="button" class="btn btn-secondary btn-sm" data-act="force1" data-v="' + v.mid + '" title="' + tx("Forzar salida", "Force check-out") + '">' + ic("log-out", "i-xs") + '<span class="hide-sm">' + tx("Forzar salida", "Force out") + "</span></button>" : "") + "</li>";
+    }).join("") || '<li class="os-row subtle small">' + tx("Nadie en las instalaciones ahora.", "No one on site right now.") + "</li>";
+    var demo = c.on ? (c.sim ? '<button type="button" class="btn btn-ghost btn-sm" data-act="unsim">' + tx("Deshacer cierre simulado", "Undo simulated closing") + "</button>" : "") : '<button type="button" class="demo-btn demo-btn-sm" data-act="simClose">' + ic("zap", "i-sm") + "<span><strong>" + tx("Demo: simular cierre del día", "Demo: simulate closing time") + "</strong><small>" + tx("Cierre real: ", "Real closing: ") + App.hm(c.close) + "</small></span></button>";
+    return '<div class="card onsite" id="onsite"><div class="card-header"><div class="row" style="gap:12px"><span class="kpi-icon" style="background:var(--ok-50);color:var(--ok-700)">' + ic("users") + '</span><div><h2>' + tx("En las instalaciones ahora", "On site now") + '</h2><div class="small subtle">' + tx("Entrada sin salida registrada · horas AST", "Checked in, not yet out · AST times") + '</div></div></div><div class="os-count" data-kpi="onsite">' + open.length + "</div></div><ul class=\"os-list\">" + rows + '</ul><div class="card-footer row between wrap" style="gap:8px">' + demo + '<a class="small" href="visits.html">' + tx("Registro de visitas oficial y CSV", "Official visit log & CSV") + " →</a></div></div>";
+  }
+  function licCard() {
+    var B = App.licBands(), mx = Math.max(B.soon6.n, B.soon30.n, B.expired.n, 1);
+    var row = function (k, label, sub, cls) { return '<button type="button" class="lic-band ' + cls + '" data-act="licBand" data-v="' + k + '"><div class="grow"><div style="font-weight:650">' + label + '</div><div class="xs subtle">' + sub + '</div><div class="lic-track"><i style="width:' + (B[k].n / mx * 100).toFixed(1) + '%"></i></div></div><strong data-lic-count="' + k + '">' + B[k].n + "</strong>" + ic("chev-right", "i-sm subtle") + "</button>"; };
+    return '<div class="card" id="licenses"><div class="card-header"><div class="row" style="gap:12px"><span class="kpi-icon" style="background:var(--warn-50);color:var(--warn-700)">' + ic("id") + '</span><div><h2>' + tx("Licencias por vencer", "Licenses expiring") + '</h2><div class="small subtle">' + tx("Licencia de Armas de cada miembro", "Each member's gun license") + "</div></div></div></div>" +
+      '<div class="card-body stack-2">' + row("soon6", tx("En 6 meses", "Within 6 months"), tx("31 a 180 días", "31 to 180 days"), "b6") + row("soon30", tx("En 30 días", "Within 30 days"), tx("0 a 30 días (incluye hoy)", "0 to 30 days (incl. today)"), "b30") + row("expired", tx("Vencidas · en gracia o con multa", "Expired · in grace or fined"), tx("No pueden tirar · recepción las rechaza", "May not shoot · refused at the desk"), "bx") + "</div>" +
+      '<div class="card-footer row between wrap" style="gap:8px"><span class="xs subtle">' + tx("Avisos de 180 días antes a 150 después", "Reminders from 180 days before to 150 after") + '</span><a class="small" href="settings.html#recordatorios">' + tx("Calendario y canales", "Timeline & channels") + " →</a></div></div>";
   }
 
   function render() {
@@ -25,7 +44,7 @@
       '<div class="row wrap">' + (ts.outbox.run
         ? '<a class="btn btn-secondary" href="outbox.html">' + ic("send", "i-sm") + tx("Ver mensajes de hoy", "View today's messages") + ' <span class="count">' + (ts.outbox.run.msgs.filter(function (m) { return m.kind !== "skip"; }).length + ts.outbox.extra.length) + "</span></a>"
         : '<button type="button" class="btn btn-primary" data-act="runReminders">' + ic("bell", "i-sm") + tx("Ejecutar recordatorios de hoy", "Run today's reminders") + ' <span class="demo-tag">DEMO</span></button>') +
-      '<button type="button" class="btn btn-secondary" data-act="soon">' + ic("download", "i-sm") + tx("Exportar CSV", "Export CSV") + "</button></div></div>";
+      '<a class="btn btn-secondary" href="visits.html">' + ic("history", "i-sm") + tx("Registro de visitas", "Visit log") + "</a></div></div>";
 
     var kpi = function (icon, bg, fg, label, value, sub, def, extra) { return '<div class="card kpi"' + (extra || "") + '><div class="kpi-label"><span class="kpi-icon" style="background:' + bg + ";color:" + fg + '">' + ic(icon) + "</span><span>" + label + '</span></div><div class="kpi-value">' + value + '</div><div class="kpi-sub">' + sub + '</div><div class="def">' + def + "</div></div>"; };
     var small = function (s) { return '<span style="font-size:18px;font-weight:600;color:var(--n-500);letter-spacing:0">' + s + "</span>"; };
@@ -73,7 +92,7 @@
       var tr = t.tiers[m.tier], hh = App.household(m, list).length, ge = App.graceEnd(m, list);
       return '<tr class="callrow"><td><a class="row-3 plain" href="checkin.html?m=' + m.id + '"><div class="avatar avatar-sm ' + (m.av || "av-1") + '">' + App.ini(m.name) + '</div><div><div style="font-weight:600" class="nowrap">' + m.name + '</div><div class="xs subtle nowrap">' + tx(tr.es, tr.en) + (hh > 1 ? " · " + hh + tx(" personas", " people") : "") + '</div></div></a></td><td class="nowrap num">' + m.phone + '</td><td class="nowrap">' + App.fds(ge) + '</td><td class="nowrap"><span class="row" style="gap:5px">' + ic(m.sms === false ? "mail" : "sms", "i-xs") + "<span>" + tx("Vencida · ", "Lapsed · ") + App.fds(ge) + '</span></span></td><td class="right num">' + money(tr.price) + '</td><td class="right"><a class="btn btn-secondary btn-sm call-btn" href="tel:' + m.phone.replace(/\D/g, "") + '" aria-label="' + tx("Llamar a ", "Call ") + m.name + '" title="' + tx("Llamar", "Call") + '">' + ic("phone-call", "i-xs") + "</a></td></tr>";
     }).join("") || '<tr><td colspan="6" class="subtle" style="padding:20px 16px">' + tx("No hay vencidas este mes.", "No lapsed members this month.") + "</td></tr>";
-    var calls = '<div class="card"><div class="card-header"><div><h2>' + tx("Vencidas este mes", "Lapsed this month") + " · " + M.lapsedN + " · " + money(M.lapsedV, false) + '</h2><div class="small subtle">' + tx("Terminó la gracia de " + t.grace + " días sin renovar · lista para llamar, por valor", t.grace + "-day grace ended without renewal · call list, by value") + '</div></div><button type="button" class="btn btn-secondary btn-sm" data-act="soon">' + ic("download", "i-sm") + tx("Exportar CSV", "Export CSV") + "</button></div>" +
+    var calls = '<div class="card"><div class="card-header"><div><h2>' + tx("Vencidas este mes", "Lapsed this month") + " · " + M.lapsedN + " · " + money(M.lapsedV, false) + '</h2><div class="small subtle">' + tx("Terminó la gracia de " + t.grace + " días sin renovar · lista para llamar, por valor", t.grace + "-day grace ended without renewal · call list, by value") + '</div></div><button type="button" class="btn btn-secondary btn-sm" data-act="callsCsv">' + ic("download", "i-sm") + tx("Exportar CSV", "Export CSV") + "</button></div>" +
       '<div class="table-wrap"><table class="table calltable"><thead><tr><th>' + tx("Miembro", "Member") + "</th><th>" + tx("Móvil", "Mobile") + "</th><th>" + tx("Venció", "Lapsed") + "</th><th>" + tx("Último aviso", "Last notice") + '</th><th class="right">' + tx("Valor", "Value") + "</th><th></th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
       '<div class="card-footer row between"><span class="small subtle">' + tx("Mostrando ", "Showing ") + Math.min(5, lapsed.length) + tx(" de ", " of ") + M.lapsedN + '</span><a class="small" href="members.html?tab=lapsed">' + tx("Ver todos los vencidos", "See all lapsed members") + " →</a></div></div>";
 
@@ -92,9 +111,10 @@
     var visits = '<div class="card"><div class="card-header"><div><h2>' + tx("Visitas", "Visits") + '</h2><div class="small subtle">' + tx("Entradas por día · últimos 14 días", "Check-ins per day · last 14 days") + '</div></div><div style="text-align:right"><div style="font-size:20px;font-weight:700;line-height:24px" data-kpi="visits">' + M.visitsToday + '</div><div class="xs subtle">' + tx("hoy hasta ahora", "today so far") + "</div></div></div>" +
       '<div class="card-body" style="padding-top:8px"><div class="days">' + dayBars + '</div><div class="xs subtle" style="margin:6px 0 16px">' + tx("Rayado = cerrado (lunes)", "Hatched = closed (Mondays)") + '</div><div class="sub-h" style="margin-bottom:8px"><h3>' + tx("Horas pico", "Peak hours") + '</h3><span class="xs subtle">' + tx("Promedio de entradas por hora · 30 días", "Avg. check-ins per hour · 30 days") + '</span></div><div class="hours">' + hourRows + "</div></div></div>";
 
-    return App.staffShell("dashboard", head + feed() + kpis + '<section class="grid-2-1">' + sources + chart + '</section><section class="grid-2-1">' + calls + visits + "</section>");
+    return App.staffShell("dashboard", head + App.closeBanner(t.owner.name) + feed() + kpis + '<section class="grid-2-1">' + onSite() + licCard() + '</section><section class="grid-2-1">' + sources + chart + '</section><section class="grid-2-1">' + calls + visits + "</section>");
   }
 
+  setInterval(function () { document.querySelectorAll("[data-since]").forEach(function (el) { el.textContent = App.dur(Date.now() - +el.dataset.since); }); }, 20000);
   App.page({
     render: render,
     title: function () { return tx("Panel", "Dashboard"); },
@@ -104,7 +124,24 @@
         App.toast(tx(msgs.filter(function (m) { return m.kind !== "skip"; }).length + " recordatorios generados", msgs.filter(function (m) { return m.kind !== "skip"; }).length + " reminders generated"));
         setTimeout(function () { location.href = "outbox.html"; }, 500);
       },
-      soon: function () { App.toast(tx("Exportar no forma parte de esta demo.", "Export isn't part of this demo."), "warn"); }
+      callsCsv: function () {
+        var t = App.ten(), list = App.members(), L = list.filter(function (m) { return !m.hh && App.status(m, list) === "lapsed" && App.graceEnd(m, list) >= "2026-10-01"; });
+        var q = function (v) { v = String(v); return /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+        var csv = [tx("Miembro,Num. de socio,Movil,Email,Plan,Gracia termino,Valor", "Member,Member #,Mobile,Email,Plan,Grace ended,Value")].concat(L.map(function (m) { return [m.name, m.id, m.phone, m.email, App.tierName(m.tier), App.graceEnd(m, list), t.tiers[m.tier].price].map(q).join(","); })).join("\r\n") + "\r\n";
+        App.downloadCSV(tx("vencidas-", "lapsed-") + App.tkey() + "-" + App.TODAY + ".csv", csv); App.toast(tx("CSV descargado", "CSV downloaded"));
+      },
+      simClose: function () { App.ts().closeSim = true; App.save(); App.rerender(); var el = document.querySelector(".close-banner"); if (el) el.scrollIntoView({ block: "center" }); },
+      unsim: function () { App.ts().closeSim = false; App.save(); App.rerender(); },
+      forceAll: App.forceAllHandler(App.ten().owner.name),
+      force1: function (el) { var v = App.checkout(el.dataset.v, { forced: App.ten().owner.name }); App.keepScroll = true; App.rerender(); if (v) App.toast(tx("Salida forzada · ", "Forced check-out · ") + App.first(v.name) + tx(" · marcada en el registro", " · flagged in the log")); },
+      licBand: function (el) {
+        var k = el.dataset.v, B = App.licBands()[k], lab = { soon6: tx("En 6 meses (31 a 180 días)", "Within 6 months (31–180 days)"), soon30: tx("En 30 días", "Within 30 days"), expired: tx("Vencidas (en gracia o con multa)", "Expired (in grace or fined)") }[k];
+        App.modal({ wide: true, render: function () {
+          return '<div class="modal-head"><h2>' + tx("Licencias · ", "Licenses · ") + lab + " · " + B.n + '</h2><button type="button" class="icon-btn" data-act="closeModal" aria-label="' + tx("Cerrar", "Close") + '">' + ic("x") + '</button></div><div class="modal-body"><div class="table-wrap"><table class="table"><thead><tr><th>' + tx("Miembro", "Member") + "</th><th>" + tx("Licencia", "License") + "</th><th>" + tx("Vence", "Expires") + "</th><th>" + tx("Estado", "Status") + "</th></tr></thead><tbody>" +
+            (B.list.map(function (m) { var L = App.lic(m); return '<tr><td><a class="plain" style="font-weight:600" href="checkin.html?m=' + m.id + '">' + m.name + '</a><div class="xs subtle">' + m.id + '</div></td><td class="mono small nowrap">' + L.masked + '</td><td class="nowrap">' + App.fd(L.exp) + "</td><td>" + App.licBadge(m) + "</td></tr>"; }).join("") || '<tr><td colspan="4" class="subtle">' + tx("Ninguna en la muestra.", "None in the sample.") + "</td></tr>") +
+            '</tbody></table></div><p class="xs subtle" style="margin-top:10px">' + tx("Mostrando " + B.list.length + " de la muestra de la demo; el total del club es " + B.n + ".", "Showing " + B.list.length + " from the demo sample; the range total is " + B.n + ".") + "</p></div>";
+        } });
+      }
     }
   });
 })();

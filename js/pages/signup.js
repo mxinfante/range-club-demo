@@ -4,13 +4,12 @@
   var tx = App.tx, ic = App.ic, vm = App.vm;
   var T = App.ten();
   vm.view = "plan"; vm.tier = T.signupTiers.indexOf("fam") >= 0 ? "fam" : T.signupTiers[0];
-  vm.f = { name: "", dob: "", phone: "", email: "", town: T.city.split(",")[0], zip: T.zip, emer: "", pref: App.L() };
-  vm.hh = []; vm.add = { name: "", dob: "" }; vm.err = {}; vm.wl = App.L(); vm.agree = false; vm.sigName = ""; vm.sig = null; vm.read = 0;
+  /* Every field starts prefilled with this club's fictional sample (RC_DATA.<club>.demo.signup); all stay editable. */
+  var DS = T.demo.signup;
+  function sample() { return { name: DS.name, dob: DS.dob, phone: DS.phone, email: DS.email, town: DS.town, zip: DS.zip, emer: DS.emer, licNo: DS.licNo, licExp: DS.licExp, pref: App.L() }; }
+  vm.f = sample();
+  vm.hh = []; vm.add = { name: DS.adult.name, dob: DS.adult.dob }; vm.err = {}; vm.wl = App.L(); vm.agree = false; vm.sigName = DS.name; vm.sigTouched = false; vm.sig = null; vm.read = 0;
   vm.emailOk = true; vm.sms = false; vm.method = "card"; vm.autorenew = false;
-  var SAMPLE = {
-    guayama: { name: "Valeria Ortiz Santiago", dob: "22/04/1994", phone: "(787) 555-0190", email: "valeria.ortiz@example.com", emer: "Luis Ortiz · (787) 555-0191" },
-    salinas: { name: "Gerardo Colón Ríos", dob: "03/11/1989", phone: "(787) 555-0290", email: "gerardo.colon@example.com", emer: "Ivette Ríos · (787) 555-0291" }
-  };
   var TOWNS = ["Guayama", "Salinas", "Arroyo", "Patillas", "Cayey", "Santa Isabel", "Coamo", "Aibonito", "Ponce", "Juana Díaz"];
   var VIEWS = ["plan", "details", "waiver", "consent", "pay"];
 
@@ -40,6 +39,9 @@
     var d = dobCheck(f.dob); if (!d.ok) e.dob = d.err;
     if (f.phone.replace(/\D/g, "").length !== 10) e.phone = tx("Escribe un móvil de 10 dígitos, por ejemplo (787) 555-0190.", "Enter a 10-digit mobile, e.g. (787) 555-0190.");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) e.email = tx("Escribe un email válido.", "Enter a valid email.");
+    if (!/^[A-Za-z0-9-]{6,}$/.test(f.licNo.trim())) e.licNo = tx("Escribe el número de tu Licencia de Armas.", "Enter your gun license (Licencia de Armas) number.");
+    var le = parseDob(f.licExp); if (!le) e.licExp = tx("Fecha no válida. Usa dd/mm/aaaa.", "Invalid date. Use dd/mm/yyyy.");
+    else if (le < App.TODAY) e.licExp = tx("Tu licencia está vencida. Para tirar necesitas una licencia vigente (Reglamento 9172).", "Your license has expired. You need a valid license to shoot (Reglamento 9172).");
     if (!/^\d{5}$/.test(f.zip.trim())) e.zip = tx("Código postal de 5 dígitos.", "5-digit ZIP code.");
     return e;
   }
@@ -61,6 +63,15 @@
     if (d.ok) return '<span class="help is-valid" id="' + id + '">' + ic("check-circle") + "<span>" + tx("Edad 21+ verificada", "Age 21+ verified") + "</span></span>";
     return '<span class="help is-error" id="' + id + '" role="alert">' + ic("alert") + "<span>" + d.err + "</span></span>";
   }
+  function licHelp(v) {
+    var iso = parseDob(v); if (!iso) return '<span class="help">' + tx("Te recordaremos 6 meses antes.", "We'll remind you 6 months ahead.") + "</span>";
+    var d = App.diff(iso, App.TODAY);
+    if (d < 0) return '<span class="help is-error">' + ic("alert") + "<span>" + tx("Vencida: sin licencia vigente no puedes tirar.", "Expired: you can't shoot without a valid license.") + "</span></span>";
+    return '<span class="help is-valid">' + ic("check-circle") + "<span>" + tx("Vigente · te avisamos desde 180 días antes", "Valid · reminders start 180 days ahead") + "</span></span>";
+  }
+  function ageLink(ok) {
+    return '<button type="button" class="demo-link" id="age-link" data-act="' + (ok ? "ageErr" : "ageFix") + '">' + ic(ok ? "alert" : "renew") + "<span>" + (ok ? tx("Mostrar error de edad", "Show age error") : tx("Usar fecha válida", "Use a valid date")) + "</span></button>";
+  }
   function shell(content, guide, sub) { return App.mobileShell({ step: "signup", sub: sub || tx("Inscripción", "Sign-up"), content: '<div class="m-page">' + content + '<div class="m-foot">' + App.powered() + "</div></div>", guide: guide }); }
   function backBtn(to) { return '<button type="button" class="btn btn-ghost btn-block" data-act="go" data-v="' + to + '">' + ic("arrow-left", "i-sm") + tx("Atrás", "Back") + "</button>"; }
 
@@ -74,7 +85,7 @@
     }).join("");
     return shell('<div class="m-content">' + stepHead(0, tx("Aprox. 4 min en total", "About 4 min total")) + '<div><h1 style="font-size:24px;line-height:31px">' + tx("Hazte socio de ", "Join ") + t.name + '</h1><p class="muted" style="margin-top:6px;font-size:15px;line-height:22px">' + tx("Elige tu membresía. Puedes cambiar de plan al renovar.", "Choose your membership. You can change plans at renewal.") + '</p></div><div class="stack-3">' + cards + "</div>" +
       '<div class="callout">' + ic("info") + "<span>" + tx("Edad mínima para inscribirse: 21 años. Cada persona del hogar debe tener 21 años o más.", "Minimum age to join: 21. Every person in the household must be 21 or older.") + '</span></div><button type="button" class="btn btn-primary btn-xl btn-block" data-act="go" data-v="details">' + tx("Continuar", "Continue") + ic("arrow-right", "i-sm") + '</button><div class="small muted" style="text-align:center">' + tx("¿Ya eres socio? ", "Already a member? ") + '<a href="portal.html">' + tx("Entra a tu portal", "Open your portal") + "</a></div></div>",
-      tx("Un miembro nuevo se inscribe desde su teléfono. Elige un plan (el Familiar permite agregar adultos del hogar).", "A new member signs up from their phone. Pick a plan (Family lets you add household adults)."));
+      tx("El plan Familiar ya está elegido y todos los campos vienen llenos: solo toca <strong>«Continuar»</strong> en cada paso.", "The Family plan is preselected and every field is prefilled: just tap <strong>“Continue”</strong> on each step."));
   }
   function vDetails() {
     var t = App.ten(), tr = t.tiers[vm.tier], f = vm.f, d = dobCheck(f.dob);
@@ -87,17 +98,19 @@
         '<button type="button" class="btn btn-secondary btn-sm" data-act="hhAdd" style="align-self:flex-start">' + ic("user-plus", "i-sm") + tx("Agregar al hogar", "Add to household") + "</button></div>" : "") + "</div>" +
       '<div class="callout">' + ic("info") + "<span>" + tx("Cada miembro del hogar debe tener 21 años o más, y cada adulto firma su propio relevo.", "Every household member must be 21 or older, and each adult signs their own waiver.") + "</span></div>" : "";
     var errs = Object.keys(vm.err).filter(function (k) { return k !== "aname"; }).length;
-    return shell('<div class="m-content">' + stepHead(1, App.tierName(vm.tier)) + '<div class="row between" style="gap:10px;align-items:flex-start"><h1 style="font-size:24px;line-height:31px">' + tx("Tus datos", "Your details") + '</h1><button type="button" class="btn btn-secondary btn-sm demo-fill" data-act="fill">' + ic("zap", "i-sm") + tx("Demo: llenar", "Demo: fill") + "</button></div>" +
+    return shell('<div class="m-content">' + stepHead(1, App.tierName(vm.tier)) + '<div class="row between" style="gap:10px;align-items:flex-start"><h1 style="font-size:24px;line-height:31px">' + tx("Tus datos", "Your details") + '</h1><button type="button" class="btn btn-secondary btn-sm demo-fill" data-act="fill">' + ic("renew", "i-sm") + tx("Restaurar ejemplo", "Restore sample") + "</button></div>" +
+      '<div class="prefill-note">' + ic("check-circle") + "<span>" + tx("Datos de ejemplo ya llenos. Puedes editarlos.", "Sample data already filled in. You can edit it.") + "</span></div>" +
       (errs ? '<div class="callout warn" role="alert">' + ic("alert") + "<span>" + tx("Revisa los campos marcados.", "Please fix the highlighted fields.") + "</span></div>" : "") +
       field("name", tx("Nombre completo", "Full name"), { attrs: ' autocomplete="name"' }) +
-      '<div class="two">' + '<div class="field"><label class="label" for="f-dob">' + tx("Fecha de nacimiento", "Date of birth") + '</label><input class="input' + (vm.err.dob || (f.dob && !d.ok) ? " is-invalid" : d.ok ? " is-valid" : "") + '" id="f-dob" data-f="dob" inputmode="numeric" placeholder="dd/mm/aaaa" value="' + App.esc(f.dob) + '" aria-describedby="h-dob"' + (vm.err.dob ? ' aria-invalid="true"' : "") + ">" + (vm.err.dob && !f.dob ? '<span class="help is-error" id="h-dob" role="alert">' + ic("alert") + "<span>" + vm.err.dob + "</span></span>" : dobHelp(f.dob, "h-dob")) + "</div>" +
+      '<div class="two">' + '<div class="field"><label class="label" for="f-dob">' + tx("Fecha de nacimiento", "Date of birth") + '</label><input class="input' + (vm.err.dob || (f.dob && !d.ok) ? " is-invalid" : d.ok ? " is-valid" : "") + '" id="f-dob" data-f="dob" inputmode="numeric" placeholder="dd/mm/aaaa" value="' + App.esc(f.dob) + '" aria-describedby="h-dob"' + (vm.err.dob ? ' aria-invalid="true"' : "") + ">" + (vm.err.dob && !f.dob ? '<span class="help is-error" id="h-dob" role="alert">' + ic("alert") + "<span>" + vm.err.dob + "</span></span>" : dobHelp(f.dob, "h-dob")) + ageLink(d.ok) + "</div>" +
       field("phone", tx("Móvil", "Mobile"), { attrs: ' inputmode="tel" autocomplete="tel" placeholder="(787) 555-0000"' }) + "</div>" +
       field("email", "Email", { attrs: ' inputmode="email" autocomplete="email" placeholder="nombre@example.com"' }) +
-      '<div class="two"><div class="field"><label class="label" for="f-town">' + tx("Municipio", "Town (municipio)") + '</label><select class="select input" id="f-town" data-f="town">' + TOWNS.map(function (x) { return "<option" + (x === f.town ? " selected" : "") + ">" + x + "</option>"; }).join("") + "</select></div>" + field("zip", tx("Código postal", "ZIP code"), { attrs: ' inputmode="numeric" maxlength="5"' }) + "</div>" +
+      '<div class="two">' + field("licNo", tx("Licencia de Armas (número)", "Gun license (number)"), { attrs: ' autocomplete="off" style="font-family:var(--mono, monospace)"', help: '<span class="help" id="h-licNo">' + tx("Se guarda cifrado; después solo verás ", "Stored encrypted; afterwards you'll only see ") + App.mask(f.licNo) + ". " + tx("Sin fotos del carnet.", "No card photos.") + "</span>" }) + field("licExp", tx("Vence la licencia", "License expires"), { attrs: ' inputmode="numeric" placeholder="dd/mm/aaaa"', help: licHelp(f.licExp) }) + "</div>" +
+      '<div class="two"><div class="field"><label class="label" for="f-town">' + tx("Municipio", "Town (municipio)") + '</label><select class="select input" id="f-town" data-f="town">' + (TOWNS.indexOf(f.town) < 0 && f.town ? [f.town] : []).concat(TOWNS).map(function (x) { return "<option" + (x === f.town ? " selected" : "") + ">" + x + "</option>"; }).join("") + "</select></div>" + field("zip", tx("Código postal", "ZIP code"), { attrs: ' inputmode="numeric" maxlength="5"' }) + "</div>" +
       field("emer", tx("Contacto de emergencia (opcional)", "Emergency contact (optional)"), { attrs: ' placeholder="' + tx("Nombre · teléfono", "Name · phone") + '"' }) +
       '<div class="field"><span class="label">' + tx("Idioma preferido para emails, textos y recibos", "Preferred language for emails, texts and receipts") + '</span><div class="seg" style="align-self:flex-start"><button type="button" data-act="pref" data-v="es" aria-pressed="' + (f.pref === "es") + '" style="height:34px;min-width:90px;font-size:13px">Español</button><button type="button" data-act="pref" data-v="en" aria-pressed="' + (f.pref === "en") + '" style="height:34px;min-width:90px;font-size:13px">English</button></div></div>' +
       household + '<div class="stack-2"><button type="button" class="btn btn-primary btn-xl btn-block" data-act="toWaiver">' + tx("Continuar al relevo", "Continue to waiver") + ic("arrow-right", "i-sm") + "</button>" + backBtn("plan") + "</div></div>",
-      tx("La validación es real: prueba una fecha de nacimiento como <strong>09/05/2006</strong> para ver el error de 21+. «Demo: llenar» pone datos de ejemplo.", "Validation is real: try a date of birth like <strong>09/05/2006</strong> to see the 21+ error. “Demo: fill” enters sample data."));
+      tx("Todo viene lleno con datos de ejemplo: toca <strong>«Continuar al relevo»</strong>. Para mostrar la validación 21+, toca <strong>«Mostrar error de edad»</strong> junto a la fecha de nacimiento (o escribe otra fecha). El adulto del hogar ya está escrito: «Agregar al hogar» es opcional.", "Everything is prefilled with sample data: tap <strong>“Continue to waiver”</strong>. To show the 21+ check, tap <strong>“Show age error”</strong> by the date of birth (or type another date). The household adult is prefilled too: “Add to household” is optional."));
   }
   function vWaiver() {
     var t = App.ten(), wt = App.waiverText(vm.wl), nameOk = vm.sigName && App.norm(vm.sigName) === App.norm(vm.f.name);
@@ -107,10 +120,10 @@
       '<label class="check' + (vm.err.agree ? " is-invalid" : "") + '"><input type="checkbox" data-act="agree"' + (vm.agree ? " checked" : "") + '><span class="check-box">' + ic("check") + '</span><span style="font-size:14.5px;line-height:21px">' + tx("He leído y acepto el relevo", "I have read and agree to the waiver") + " (" + tx("versión ", "version ") + t.waiver.v + ", " + (vm.wl === "en" ? tx("en inglés", "English") : tx("en español", "Spanish")) + ").</span></label>" +
       (vm.err.agree ? '<span class="help is-error" role="alert" style="margin-top:-8px">' + ic("alert") + "<span>" + vm.err.agree + "</span></span>" : "") +
       '<div class="field"><label class="label" for="sig-name">' + tx("Escribe tu nombre legal completo", "Type your full legal name") + '</label><input class="input' + (vm.err.sigName ? " is-invalid" : nameOk ? " is-valid" : "") + '" id="sig-name" data-s="1" value="' + App.esc(vm.sigName) + '" placeholder="' + App.esc(vm.f.name) + '" autocomplete="off">' + (vm.err.sigName ? '<span class="help is-error" role="alert">' + ic("alert") + "<span>" + vm.err.sigName + "</span></span>" : '<span class="help">' + tx("Debe coincidir con: ", "Must match: ") + "<strong>" + App.esc(vm.f.name) + "</strong></span>") + "</div>" +
-      '<div class="field"><span class="label">' + tx("Firma con tu dedo (o el ratón)", "Sign with your finger (or mouse)") + '</span><div class="sigpad' + (vm.err.sig ? " is-invalid" : "") + '"><canvas id="sig" aria-label="' + tx("Área de firma", "Signature area") + '"></canvas><button type="button" class="clear" data-act="sigClear">' + ic("x", "i-xs") + tx("Borrar", "Clear") + '</button><span class="base"></span><span class="x">×</span><span class="lbl">' + tx("Firma", "Signature") + "</span></div>" + (vm.err.sig ? '<span class="help is-error" role="alert">' + ic("alert") + "<span>" + vm.err.sig + "</span></span>" : "") + "</div>" +
+      '<div class="field"><span class="label">' + tx("Firma con tu dedo (o el ratón)", "Sign with your finger (or mouse)") + '</span><div class="sigpad' + (vm.err.sig ? " is-invalid" : "") + '"><canvas id="sig" aria-label="' + tx("Área de firma", "Signature area") + '"></canvas>' + (vm.sig ? "" : App.sigTapBtn()) + '<button type="button" class="clear" data-act="sigClear">' + ic("x", "i-xs") + tx("Borrar", "Clear") + '</button><span class="base"></span><span class="x">×</span><span class="lbl">' + tx("Firma", "Signature") + "</span></div>" + (vm.err.sig ? '<span class="help is-error" role="alert">' + ic("alert") + "<span>" + vm.err.sig + "</span></span>" : "") + "</div>" +
       '<div class="callout tenant">' + ic("shield") + "<span>" + tx("Guardamos la versión y el texto exacto que firmaste, el idioma, la fecha y hora, y tu IP o dispositivo. Te enviamos una copia en PDF por email. Los relevos firmados nunca se editan ni se borran.", "We keep the exact version and text you signed, the language, date and time, and your IP address or device. A PDF copy is emailed to you. Signed waivers can never be edited or deleted.") + "</span></div>" +
       '<div class="stack-2"><button type="button" class="btn btn-primary btn-xl btn-block" data-act="sign">' + ic("pen", "i-sm") + tx("Firmar relevo", "Sign waiver") + "</button>" + backBtn("details") + "</div></div>",
-      tx("Elige el relevo en <strong>español o inglés</strong>, escribe el nombre exacto y firma en el recuadro con el ratón o el dedo.", "Pick the waiver in <strong>Spanish or English</strong>, type the exact name and sign in the box with a mouse or finger."), tx("Inscripción · Relevo", "Sign-up · Waiver"));
+      tx("El nombre ya está escrito. Marca <strong>«He leído y acepto»</strong> (por ley empieza sin marcar), toca <strong>«Toca para firmar»</strong> y luego <strong>«Firmar relevo»</strong>. Puedes cambiar a <strong>inglés</strong> o dibujar la firma a mano.", "The name is already typed. Check <strong>“I have read and agree”</strong> (legally it starts unchecked), tap <strong>“Tap to sign”</strong>, then <strong>“Sign waiver”</strong>. You can switch to <strong>English</strong> or draw the signature by hand."), tx("Inscripción · Relevo", "Sign-up · Waiver"));
   }
   function vConsent() {
     var t = App.ten(), f = vm.f;
@@ -120,20 +133,20 @@
       '<div class="secure-note" style="margin-left:34px">' + ic("shield") + "<span>" + tx("Guardamos la fecha, la hora y el texto exacto de cada consentimiento. Email y texto se registran por separado.", "We store the date, time and exact wording of each consent. Email and text are tracked separately.") + "</span></div></div>" +
       (!vm.emailOk ? '<div class="callout">' + ic("info") + "<span>" + tx("Sin email ni texto no recibirás recordatorios; los recibos se envían igual porque son transaccionales.", "Without email or text you won't get reminders; receipts are still sent because they're transactional.") + "</span></div>" : "") +
       '<div class="stack-2"><button type="button" class="btn btn-primary btn-xl btn-block" data-act="go" data-v="pay">' + tx("Continuar al pago", "Continue to payment") + ic("arrow-right", "i-sm") + "</button>" + backBtn("waiver") + "</div></div>",
-      tx("El consentimiento para textos (SMS) viene <strong>desmarcado</strong>: el miembro decide. Si lo marca, recibirá el texto de bienvenida.", "Text (SMS) consent starts <strong>unchecked</strong>: the member decides. If checked, they get the welcome text."));
+      tx("Por cumplimiento, el consentimiento para textos (SMS) viene <strong>desmarcado</strong>: un toque lo marca. Si lo marca, recibirá el texto de bienvenida. Luego toca <strong>«Continuar al pago»</strong>.", "For compliance, text (SMS) consent starts <strong>unchecked</strong>: one tap checks it. If checked, they get the welcome text. Then tap <strong>“Continue to payment”</strong>."));
   }
   function vPay() {
     var t = App.ten(), tr = t.tiers[vm.tier], exp = tr.term === "month" ? App.addMonths(App.TODAY, 1) : App.addMonths(App.TODAY, 12);
     vm.phone = vm.f.phone;
     return shell('<div class="m-content">' + stepHead(4, App.money(tr.price)) + '<h1 style="font-size:24px;line-height:31px">' + tx("Pago", "Payment") + "</h1>" +
       '<div class="m-card m-card-pad" style="padding-top:8px;padding-bottom:8px"><div class="kv"><span class="k">' + tx("Plan", "Plan") + '</span><span class="v">' + App.tierName(vm.tier) + '</span></div><div class="kv"><span class="k">' + tx("Hogar", "Household") + '</span><span class="v">' + (1 + vm.hh.length) + ((1 + vm.hh.length) === 1 ? tx(" persona", " person") : tx(" personas", " people")) + '</span></div><div class="kv"><span class="k">' + tx("Primer período", "First period") + '</span><span class="v">' + App.fd(App.TODAY) + " – " + App.fd(exp) + '</span></div><div class="kv"><span class="k" style="font-weight:700;color:var(--n-900)">Total</span><span class="v" style="font-size:17px">' + App.money(tr.price) + "</span></div></div>" +
-      '<div class="m-section-title">' + tx("Método de pago", "Payment method") + '</div><div class="stack-3">' + App.payPicker(vm) + "</div>" +
+      '<div class="m-section-title">' + tx("Método de pago", "Payment method") + '</div><div class="stack-3">' + App.payPicker(vm, { name: vm.f.name, email: vm.f.email, phone: vm.f.phone }) + "</div>" +
       '<div class="callout info">' + ic("hourglass") + "<span>" + tx("Tu membresía queda <strong>Pendiente</strong> hasta completar el pago. Luego tu tarjeta digital está lista al instante.", "Your membership stays <strong>Pending</strong> until payment is complete. Then your digital card is ready right away.") + "</span></div>" +
       '<div class="stack-2"><button type="button" class="btn btn-tenant btn-xl btn-block" data-act="pay">' + (vm.method === "ath" ? '<span class="wm wm-ath" style="color:#fff">ATH</span>' + tx("Pagar con ATH Móvil · ", "Pay with ATH Móvil · ") : ic("lock", "i-sm") + tx("Pagar e inscribirme · ", "Pay and join · ")) + App.money(tr.price) + "</button>" + backBtn("consent") + "</div></div>",
-      tx("ATH Móvil muestra la espera de aprobación con cuenta regresiva. PayPal o tarjeta confirman al instante y permiten auto-renovación.", "ATH Móvil shows the approval wait with a countdown. PayPal or card confirm instantly and allow auto-renew."));
+      tx("Tarjeta de prueba, PayPal y móvil de ATH Móvil ya vienen llenos. ATH Móvil muestra la espera de aprobación con cuenta regresiva; PayPal o tarjeta confirman al instante y permiten auto-renovación (apagada por defecto).", "Test card, PayPal and ATH Móvil number are prefilled. ATH Móvil shows the approval wait with a countdown; PayPal or card confirm instantly and allow auto-renew (off by default)."));
   }
   function vAth() {
-    return shell('<div class="m-content" style="padding-top:22px">' + App.athView({ amount: App.ten().tiers[vm.tier].price, phone: vm.f.phone, expired: vm.expired }) + "</div>",
+    return shell('<div class="m-content" style="padding-top:22px">' + App.athView({ amount: App.ten().tiers[vm.tier].price, phone: vm.athPhone || vm.f.phone, expired: vm.expired }) + "</div>",
       tx("Cuenta regresiva real de 10 minutos. Toca <strong>«Demo: simular aprobación»</strong> para continuar.", "Real 10-minute countdown. Tap <strong>“Demo: simulate approval”</strong> to continue."), tx("Pago con ATH Móvil", "ATH Móvil payment"));
   }
   function vDone() {
@@ -159,7 +172,7 @@
     var exp = tr.term === "month" ? App.addMonths(App.TODAY, 1) : App.addMonths(App.TODAY, 12);
     var m = { id: id, name: f.name.trim().replace(/\s+/g, " "), av: "av-4", p: 6, email: f.email.trim(), phone: f.phone.trim(), tier: vm.tier, expires: exp, used: 0,
       autorenew: vm.autorenew && vm.method !== "ath" ? vm.method : null, waiver: { v: t.waiver.v, date: App.TODAY, lang: vm.wl }, orient: null, last: null,
-      pref: f.pref, sms: !!vm.sms, emailOk: vm.emailOk, dob: dobCheck(f.dob).iso, since: 2026, pay: [[App.TODAY, tr.price, vm.method]], town: f.town, zip: f.zip, newSignup: true };
+      pref: f.pref, sms: !!vm.sms, emailOk: vm.emailOk, dob: dobCheck(f.dob).iso, since: 2026, pay: [[App.TODAY, tr.price, vm.method]], town: f.town, zip: f.zip, emer: f.emer.trim(), lic: { no: f.licNo.trim().toUpperCase(), exp: parseDob(f.licExp) }, newSignup: true };
     ts.added.push(m); App.save();
     vm.hh.forEach(function (h, i) { var hid = App.nextId() || (id + "-" + (i + 2)); ts.added.push({ id: hid, name: h.name, av: "av-" + ((i % 6) + 2), p: (i + 2) % 7, hh: id, email: "", phone: "", waiver: null, orient: null, last: null, dob: h.iso, newSignup: true }); App.save(); });
     App.event({ type: "signup", id: id, name: m.name, amount: tr.price, tier: vm.tier, method: vm.method });
@@ -180,7 +193,7 @@
         el.addEventListener(ev, function () {
           vm.f[el.dataset.f] = el.value;
           if (vm.err[el.dataset.f] && el.dataset.f !== "dob") { var chk = validateDetails(); if (!chk[el.dataset.f]) { vm.err[el.dataset.f] = null; el.classList.remove("is-invalid"); var eh = el.parentNode.querySelector(".help.is-error"); if (eh) eh.remove(); } }
-          if (el.dataset.f === "dob") { var h = document.getElementById("h-dob"); var tmp = document.createElement("div"); tmp.innerHTML = dobHelp(el.value, "h-dob"); if (h) h.replaceWith(tmp.firstChild); var d = dobCheck(el.value); el.classList.toggle("is-invalid", !!el.value && !d.ok); el.classList.toggle("is-valid", !!d.ok); }
+          if (el.dataset.f === "dob") { var h = document.getElementById("h-dob"); var tmp = document.createElement("div"); tmp.innerHTML = dobHelp(el.value, "h-dob"); if (h) h.replaceWith(tmp.firstChild); var d = dobCheck(el.value); el.classList.toggle("is-invalid", !!el.value && !d.ok); el.classList.toggle("is-valid", !!d.ok); var al = document.getElementById("age-link"); if (al) { var t2 = document.createElement("div"); t2.innerHTML = ageLink(!!d.ok); al.replaceWith(t2.firstChild); } }
         });
       });
       root.querySelectorAll("[data-a]").forEach(function (el) {
@@ -189,7 +202,7 @@
           if (el.dataset.a === "dob") { var h = document.getElementById("h-adob"); var tmp = document.createElement("div"); tmp.innerHTML = dobHelp(el.value, "h-adob"); if (h) h.replaceWith(tmp.firstChild); el.classList.toggle("is-invalid", !!el.value && !dobCheck(el.value).ok); }
         });
       });
-      var sn = document.getElementById("sig-name"); if (sn) sn.addEventListener("input", function () { vm.sigName = sn.value; var ok = App.norm(sn.value) === App.norm(vm.f.name); sn.classList.toggle("is-valid", ok); if (ok && vm.err.sigName) { vm.err.sigName = null; sn.classList.remove("is-invalid"); var e = sn.parentNode.querySelector(".help.is-error"); if (e) e.remove(); } });
+      var sn = document.getElementById("sig-name"); if (sn) sn.addEventListener("input", function () { vm.sigName = sn.value; vm.sigTouched = true; var ok = App.norm(sn.value) === App.norm(vm.f.name); sn.classList.toggle("is-valid", ok); if (ok && vm.err.sigName) { vm.err.sigName = null; sn.classList.remove("is-invalid"); var e = sn.parentNode.querySelector(".help.is-error"); if (e) e.remove(); } });
       var doc = document.getElementById("doc");
       if (doc) {
         var upd = function () { var r = doc.scrollHeight <= doc.clientHeight + 2 ? 1 : (doc.scrollTop + doc.clientHeight) / doc.scrollHeight; vm.read = Math.max(vm.read, r); var b = document.getElementById("readbar"); if (b) b.style.width = Math.round(vm.read * 100) + "%"; var n = document.getElementById("readnote"); if (n && vm.read >= 0.98) { n.style.color = "var(--ok-700)"; n.innerHTML = ic("check-circle", "i-xs") + "<span>" + tx("Leído hasta el final", "Read to the end") + "</span>"; } };
@@ -201,7 +214,9 @@
     handlers: Object.assign(App.payHandlers(vm, App.rerender), {
       tier: function (el) { vm.tier = el.dataset.v; var tr = App.ten().tiers[vm.tier]; if (vm.hh.length > tr.hh - 1) vm.hh = vm.hh.slice(0, Math.max(0, tr.hh - 1)); App.keepScroll = true; App.rerender(); },
       go: function (el) { var v = el.dataset.v; if (v === "pay" && !vm.emailOk && !vm.sms) { /* allowed: receipts are transactional */ } goView(v); },
-      fill: function () { var s = SAMPLE[App.tkey()]; Object.assign(vm.f, { name: s.name, dob: s.dob, phone: s.phone, email: s.email, emer: s.emer }); vm.err = {}; App.keepScroll = true; App.rerender(); },
+      fill: function () { var pref = vm.f.pref; vm.f = sample(); vm.f.pref = pref; vm.add = { name: DS.adult.name, dob: DS.adult.dob }; vm.err = {}; App.keepScroll = true; App.rerender(); },
+      ageErr: function () { vm.f.dob = App.ten().demo.underage; vm.err.dob = null; App.keepScroll = true; App.rerender(); var el = document.getElementById("f-dob"); if (el) { el.scrollIntoView({ block: "center" }); } },
+      ageFix: function () { vm.f.dob = DS.dob; vm.err.dob = null; App.keepScroll = true; App.rerender(); },
       pref: function (el) { vm.f.pref = el.dataset.v; App.keepScroll = true; App.rerender(); },
       hhAdd: function () {
         var tr = App.ten().tiers[vm.tier], nm = vm.add.name.trim(), d = dobCheck(vm.add.dob); vm.err.aname = null;
@@ -211,10 +226,11 @@
         vm.hh.push({ name: nm, iso: d.iso }); vm.add = { name: "", dob: "" }; App.keepScroll = true; App.rerender();
       },
       hhDel: function (el) { vm.hh.splice(+el.dataset.v, 1); App.keepScroll = true; App.rerender(); },
-      toWaiver: function () { vm.err = validateDetails(); if (Object.keys(vm.err).length) { App.keepScroll = true; App.rerender(); focusFirstError(); return; } vm.sigName = vm.sigName || ""; goView("waiver"); },
+      toWaiver: function () { vm.err = validateDetails(); if (Object.keys(vm.err).length) { App.keepScroll = true; App.rerender(); focusFirstError(); return; } if (!vm.sigTouched) vm.sigName = vm.f.name; goView("waiver"); },
       wl: function (el) { vm.wl = el.dataset.v; vm.read = 0; App.keepScroll = true; App.rerender(); },
       agree: function (el) { vm.agree = el.checked; if (vm.agree && vm.err.agree) { vm.err.agree = null; App.keepScroll = true; App.rerender(); } },
       sigClear: function () { vm.sig = null; App.keepScroll = true; App.rerender(); },
+      sigTap: function (el) { var c = document.getElementById("sig"); if (!c) return; el.remove(); App.autoSign(c, vm.f.name, function (sg) { vm.sig = sg; if (vm.err.sig) { vm.err.sig = null; c.parentNode.classList.remove("is-invalid"); var e = c.parentNode.parentNode.querySelector(".help.is-error"); if (e) e.remove(); } }); },
       sign: function () {
         var e = {};
         if (!vm.agree) e.agree = tx("Marca que leíste y aceptas el relevo.", "Check that you read and agree to the waiver.");
@@ -226,6 +242,7 @@
       emailOk: function (el) { vm.emailOk = el.checked; App.keepScroll = true; App.rerender(); },
       sms: function (el) { vm.sms = el.checked; },
       pay: function () {
+        var pe = App.payCheck(vm); if (pe) { App.toast(pe, "warn"); return; }
         if (vm.method === "ath") { goView("ath"); startAth(); return; }
         App.simulatePay(vm, App.ten().tiers[vm.tier].price, { email: vm.f.email }, createMember);
       },

@@ -10,15 +10,34 @@
   /* ------------------------------------------------------------ storage + state */
   var mem = null, storeOK = true;
   try { localStorage.setItem(KEY + "-probe", "1"); localStorage.removeItem(KEY + "-probe"); } catch (e) { storeOK = false; }
-  function blankTenant() { return { m: {}, added: [], events: [], outbox: { run: null, extra: [] }, seq: 0, current: null }; }
+  /* Each club starts with today's seeded visits (some still on site), anchored to the moment the demo state is created. */
+  var CALS = ["9mm", ".22 LR", ".45 ACP", ".380 ACP", "12 ga", ".38 Special", ".223 Rem"];
+  function calFor(mem) { if (mem && mem.cal) return mem.cal; var h = 0, id = (mem && mem.id) || ""; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 9973; return CALS[h % CALS.length]; }
+  function defSettings(d) { return { close: d.close, licCh: { email: true, push: true, app: true, sms: false } }; }
+  function blankTenant(k) {
+    var d = D[k], now = Date.now(), n = 0, m = {};
+    var visits = (d.visitSeed || []).map(function (v) {
+      var mem = d.members.filter(function (x) { return x.id === v.id; })[0] || {};
+      m[v.id] = { last: TODAY };
+      return { vid: k[0] + "v" + (++n), mid: v.id, name: mem.name, lic: mem.lic ? mem.lic.no : "", cal: v.cal || calFor(mem), in: now - v.inAgo * 60000, out: v.outAgo != null ? now - v.outAgo * 60000 : null,
+        inBy: v.kiosk ? "kiosk" : d.staff.name, outBy: v.outAgo != null ? (v.kiosk ? "kiosk" : d.staff.name) : null, forced: false, guests: [], seed: true };
+    });
+    /* one non-shooting companion already on site with a seeded member */
+    var gs = 0;
+    (d.companionSeed || []).forEach(function (c) {
+      var host = d.members.filter(function (x) { return x.id === c.host; })[0] || {};
+      visits.push({ vid: k[0] + "v" + (++n), mid: "G-" + k[0].toUpperCase() + (++gs), type: "companion", host: c.host, hostName: host.name, name: c.name, lic: "", cal: "", in: now - c.inAgo * 60000, out: null, inBy: d.staff.name, outBy: null, forced: false, guests: [], seed: true });
+    });
+    return { m: m, added: [], events: [], outbox: { run: null, extra: [] }, seq: 0, current: null, visits: visits, vseq: n, gseq: gs, settings: defSettings(d), closeSim: false };
+  }
   function fresh(prev) {
-    return { v: 1, lang: (prev && prev.lang) || "es", tenant: (prev && prev.tenant) || "guayama", t: { guayama: blankTenant(), salinas: blankTenant() } };
+    return { v: 3, lang: (prev && prev.lang) || "es", tenant: (prev && prev.tenant) || "guayama", t: { guayama: blankTenant("guayama"), salinas: blankTenant("salinas") } };
   }
   function load() {
     if (mem) return mem;
     var s = null;
     if (storeOK) { try { s = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { s = null; } }
-    if (!s || s.v !== 1) s = fresh();
+    if (!s || s.v !== 3) s = fresh(s);
     mem = s; return s;
   }
   function save() { if (storeOK) { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch (e) { } } }
@@ -72,10 +91,13 @@
       : DES[d.getUTCDay()] + ", " + d.getUTCDate() + " de " + MESL[d.getUTCMonth()] + " de " + d.getUTCFullYear();
   };
   App.time = function (ms, lang) {
-    var d = ms ? new Date(ms) : new Date(), h = d.getHours(), m = ("0" + d.getMinutes()).slice(-2), l = lang || S.lang;
+    var d = ms ? new Date(ms) : new Date(), h = (d.getUTCHours() + 20) % 24, m = ("0" + d.getUTCMinutes()).slice(-2), l = lang || S.lang; // AST = UTC-4
     var h12 = h % 12 || 12, pm = h >= 12;
     return l === "en" ? h12 + ":" + m + " " + (pm ? "PM" : "AM") : h12 + ":" + m + (pm ? " p. m." : " a. m.");
   };
+  App.astMinutes = function (ms) { var d = ms ? new Date(ms) : new Date(); return ((d.getUTCHours() + 20) % 24) * 60 + d.getUTCMinutes(); };
+  App.dur = function (ms) { var mins = Math.max(0, Math.round(ms / 60000)); if (mins < 1) return tx("menos de 1 min", "under 1 min"); var h = Math.floor(mins / 60), mm = mins % 60; return (h ? h + " h " : "") + (h && !mm ? "" : mm + " min"); };
+  App.hm = function (hhmm, lang) { var a = String(hhmm || "18:00").split(":"), h = +a[0], m = a[1] || "00", l = lang || S.lang, h12 = h % 12 || 12; return l === "en" ? h12 + ":" + m + " " + (h >= 12 ? "PM" : "AM") : h12 + ":" + m + (h >= 12 ? " p. m." : " a. m."); };
   App.money = function (n, dec) { var s = (dec === false ? Math.round(n).toLocaleString("en-US") : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })); return "$" + s; };
   App.esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); };
   App.ini = function (name) { var p = name.split(" ").filter(Boolean); return ((p[0] || "")[0] + ((p[1] || "")[0] || "")).toUpperCase(); };
@@ -110,7 +132,20 @@
   App.graceEnd = function (m, list) { var p = App.primary(m, list); return p.expires ? App.addDays(p.expires, App.ten().grace) : null; };
   App.passes = function (m, list) { var p = App.primary(m, list), tr = App.ten().tiers[p.tier]; var tot = tr ? tr.passes : 0; return [Math.max(0, tot - (p.used || 0)), tot]; };
   App.age = function (dobIso) { var d = pd(dobIso), n = pd(TODAY); var a = n.getUTCFullYear() - d.getUTCFullYear(); if (n.getUTCMonth() < d.getUTCMonth() || (n.getUTCMonth() === d.getUTCMonth() && n.getUTCDate() < d.getUTCDate())) a--; return a; };
-  App.checkedInToday = function (id) { var e = App.ts().events; for (var i = e.length - 1; i >= 0; i--) if (e[i].type === "checkin" && e[i].id === id) return e[i]; return null; };
+  App.visits = function () { var ts = App.ts(); if (!ts.visits) { ts.visits = []; ts.vseq = 0; } return ts.visits; };
+  App.lastVisit = function (id) { var v = App.visits(); for (var i = v.length - 1; i >= 0; i--) if (v[i].mid === id) return v[i]; return null; };
+  App.openVisit = function (id) { var v = App.lastVisit(id); return v && !v.out ? v : null; };
+  App.onSite = function () { return App.visits().filter(function (v) { return !v.out; }); };
+  /* "checked in today" = currently on site (open visit); shape kept compatible with the old event object */
+  App.checkedInToday = function (id) { var v = App.openVisit(id); return v ? { at: v.in, guests: v.guests || [], where: v.inBy === "kiosk" ? "kiosk" : "desk", cal: v.cal, v: v } : null; };
+  App.settings = function () { var ts = App.ts(); if (!ts.settings) ts.settings = defSettings(App.ten()); if (!ts.settings.licCh) ts.settings.licCh = defSettings(App.ten()).licCh; return ts.settings; };
+  App.setSetting = function (k, v) { App.settings()[k] = v; save(); };
+  /* Reg. 9172 Arts. 3.06(K)/3.07(N): the visit log records the caliber used. Prefilled with the member's usual caliber; staff or member can change it. */
+  App.CALS = CALS;
+  App.calFor = function (m) { return calFor(m); };
+  /* license numbers are confidential (Ley 168 Art. 2.01): show the last 4 only */
+  App.mask = function (no) { no = String(no || ""); return no ? "•••• " + no.replace(/[^A-Za-z0-9]/g, "").slice(-4) : "—"; };
+  App.closeState = function () { var c = App.settings().close || App.ten().close, a = c.split(":"), after = App.astMinutes() >= (+a[0]) * 60 + (+a[1] || 0); return { close: c, after: after, sim: !!App.ts().closeSim, on: after || !!App.ts().closeSim, open: App.onSite() }; };
 
   /* Check-in rule (spec): membership Active (or Grace if allowed) AND current waiver version AND
      unexpired orientation (if required) AND not suspended AND verified age 21+. */
@@ -163,10 +198,29 @@
         fix: tx("Llamar al dueño", "Call the owner"), act: "fixCall", icon2: "phone-call", dark: true });
     } else C.s = ["ok", ["Al día", "Clear"], [tx("Sin incidentes", "No incidents")]];
     C.a = ["ok", ["Verificada", "Verified"], [m.dob ? App.age(m.dob) + tx(" años", " yrs") : "21+"]];
+    /* Gun license: expired, suspended or revoked ALWAYS blocks (Reg. 9172 Art. 3.05(3)(a): the range may not let anyone shoot without a valid license). Expiring today = warning only. */
+    var LI = App.lic(m);
+    if (LI.blocked) {
+      var why = LI.band === "expired" ? [tx("Venció el " + App.fd(LI.exp, "es") + " (hace " + -LI.days + " días)", "Expired " + App.fd(LI.exp, "en") + " (" + -LI.days + " days ago)"), tx("Licencia de armas vencida", "Gun license expired")]
+        : LI.band === "suspended" ? [tx("Suspendida por orden del tribunal", "Suspended by court order"), tx("Licencia de armas suspendida", "Gun license suspended")]
+        : [tx("Revocada", "Revoked"), tx("Licencia de armas revocada", "Gun license revoked")];
+      C.l = ["bad", LI.band === "expired" ? ["Vencida", "Expired"] : LI.band === "suspended" ? ["Suspendida", "Suspended"] : ["Revocada", "Revoked"], [LI.band === "expired" ? tx("Hace " + -LI.days + " días", -LI.days + " days ago") : App.mask(LI.no)]];
+      B.unshift({ kind: "bad", icon: "id", t: why[1] + tx(" · no puede tirar", " · may not shoot"), lic: true,
+        d: tx("Licencia " + App.mask(LI.no) + ": " + why[0].charAt(0).toLowerCase() + why[0].slice(1) + ". Sin licencia vigente no se permite tirar (Reg. 9172 Art. 3.05). " + (LI.band === "expired" ? "Si trae el carnet renovado, actualiza la fecha." + (LI.filed ? " Renovación radicada el " + App.fd(LI.filed, "es") + ": aun así no puede tirar." : "") : "No se puede levantar desde recepción."),
+          "License " + App.mask(LI.no) + ": " + why[0].charAt(0).toLowerCase() + why[0].slice(1) + ". Shooting without a valid license isn't allowed (Reg. 9172 Art. 3.05). " + (LI.band === "expired" ? "If they bring the renewed card, update the date." + (LI.filed ? " Renewal filed " + App.fd(LI.filed, "en") + ": they still may not shoot." : "") : "Can't be lifted from the front desk.")),
+        fix: LI.band === "expired" ? tx("Actualizar licencia", "Update license") : tx("Llamar al dueño", "Call the owner"), act: LI.band === "expired" ? "fixLicense" : "fixCall", icon2: LI.band === "expired" ? "edit" : "phone-call" });
+    } else if (LI.band === "today") {
+      C.l = ["warn", ["Vence hoy", "Expires today"], [App.fds(LI.exp)]];
+      B.push({ kind: "warn", icon: "id", t: tx("Licencia de armas vence hoy", "Gun license expires today"), lic: true, soft: true,
+        d: tx("Licencia " + App.mask(LI.no) + " es válida hasta hoy. Desde mañana no podrá tirar hasta renovarla; recuérdaselo.", "License " + App.mask(LI.no) + " is valid through today. From tomorrow they can't shoot until it's renewed; remind them."),
+        fix: tx("Ver licencia", "View license"), act: "fixLicense", icon2: "id" });
+    } else if (LI.band === "soon30") C.l = ["warn", ["Vence en " + LI.days + " d", "Expires in " + LI.days + " d"], [App.fds(LI.exp)]];
+    else if (LI.band === "none") C.l = ["req", ["Falta", "Missing"], [tx("Sin licencia en archivo", "None on file")]];
+    else C.l = ["ok", ["Vigente", "Valid"], [tx("Hasta ", "Until ") + App.fds(LI.exp)]];
     var hard = B.filter(function (b) { return b.kind !== "warn"; });
     var can = hard.length === 0;
-    var hero = st === "suspended" ? "suspended" : (can ? (st === "grace" ? "grace" : "go") : "stop");
-    return { st: st, C: C, B: B, can: can, hero: hero, hard: hard.length };
+    var hero = st === "suspended" ? "suspended" : LI.blocked ? "licstop" : (can ? (LI.band === "today" ? "lictoday" : st === "grace" ? "grace" : "go") : "stop");
+    return { st: st, C: C, B: B, can: can, hero: hero, hard: hard.length, lic: LI };
   };
 
   /* ------------------------------------------------------------ actions */
@@ -185,13 +239,137 @@
     App.queueMsg({ kind: "receipt", mid: p.id, ch: ["email"] });
     return { receipt: receipt, exp: exp, tier: tr, amount: tr.price, prev: st, auto: auto };
   };
+  /* Guests are logged as their own visits under the host member:
+     type "guest" = shooting guest (guest pass or fee; own gun license + caliber), type "companion" = non-shooting companion (no license / caliber). */
+  App.addGuestVisit = function (host, g, where) {
+    var ts = App.ts(), vs = App.visits(); ts.vseq = (ts.vseq || vs.length) + 1; ts.gseq = (ts.gseq || 0) + 1;
+    var comp = g.kind === "companion";
+    var v = { vid: S.tenant[0] + "v" + ts.vseq, mid: "G-" + S.tenant[0].toUpperCase() + ts.gseq, type: comp ? "companion" : "guest", host: host.id, hostName: host.name, name: g.name, lic: comp ? "" : (g.lic || ""), cal: comp ? "" : (g.cal || ""),
+      in: Date.now(), out: null, inBy: where === "kiosk" ? "kiosk" : App.ten().staff.name, outBy: null, forced: false, guests: [], pass: !!g.pass };
+    vs.push(v); App.event({ type: comp ? "companion" : "guestIn", id: host.id, name: g.name, host: host.name, where: where || "desk" });
+    return v;
+  };
+  App.guestsOf = function (hostId, openOnly) { return App.visits().filter(function (v) { return v.host === hostId && (!openOnly || !v.out); }); };
+  App.guestBadge = function (v) { return v.type === "companion" ? '<span class="badge badge--guestns" data-companion>' + tx("Invitado (no dispara)", "Guest (no shooting)") + "</span>" : v.type === "guest" ? '<span class="badge badge--guests" data-shootguest>' + tx("Invitado (dispara)", "Shooting guest") + "</span>" : ""; };
+  App.isCompanion = function (v) { return v && v.type === "companion"; };
+  App.visitType = function (v, lang) { var e = (lang || S.lang) === "en"; return v.type === "companion" ? (e ? "Guest (no shooting)" : "Invitado (no dispara)") : v.type === "guest" ? (e ? "Shooting guest" : "Invitado (dispara)") : (e ? "Member" : "Miembro"); };
   App.checkin = function (id, guests, where) {
     var list = App.members(), m = App.member(id, list), p = App.primary(m, list);
-    var g = guests || [];
-    if (g.length) App.update(p.id, { used: (p.used || 0) + g.length });
+    var g = guests || [], shoot = g.filter(function (x) { return x.kind !== "companion"; });
+    if (shoot.length) App.update(p.id, { used: (p.used || 0) + shoot.filter(function (x) { return x.pass; }).length });
     App.update(m.id, { last: TODAY });
-    return App.event({ type: "checkin", id: m.id, name: m.name, guests: g, where: where || "desk" });
+    var ts = App.ts(), vs = App.visits(), cal = arguments[3] || calFor(m);
+    ts.vseq = (ts.vseq || vs.length) + 1;
+    vs.push({ vid: S.tenant[0] + "v" + ts.vseq, mid: m.id, type: "member", name: m.name, lic: (m.lic && m.lic.no) || "", cal: cal, in: Date.now(), out: null, inBy: where === "kiosk" ? "kiosk" : App.ten().staff.name, outBy: null, forced: false, guests: g.map(function (x) { return x.name; }) });
+    var ev = App.event({ type: "checkin", id: m.id, name: m.name, guests: g, where: where || "desk", cal: cal });
+    g.forEach(function (x) { App.addGuestVisit(m, x, where); });
+    save(); return ev;
   };
+  /* check-out: o.where = "desk" | "kiosk"; o.forced = staff name for an end-of-day forced check-out (flagged in the log) */
+  App.setCal = function (id, cal) { var v = App.openVisit(id) || App.lastVisit(id); if (v && cal) { v.cal = String(cal).slice(0, 24); save(); } return v; };
+  App.checkout = function (id, o) {
+    o = o || {}; var v = App.openVisit(id); if (!v) return null;
+    v.out = Date.now(); v.forced = !!o.forced; v.outBy = o.forced ? o.forced : (o.where === "kiosk" ? "kiosk" : App.ten().staff.name);
+    App.event({ type: "checkout", id: v.host || id, name: v.name, dur: v.out - v.in, where: o.where || "desk", forced: !!o.forced, by: v.outBy, guest: !!v.host });
+    if (!v.host) App.guestsOf(id, true).forEach(function (gv) { gv.out = v.out; gv.forced = v.forced; gv.outBy = v.outBy; }); // guests leave with their member
+    save(); return v;
+  };
+  App.forceCheckoutAll = function (by) { return App.onSite().map(function (v) { return App.checkout(v.mid, { forced: by }); }); };
+
+  /* Visits for any day in the log: today = live visits; earlier days = deterministic sample history (closed visits). */
+  App.visitsFor = function (day) {
+    if (day === TODAY) return App.visits().slice();
+    if (day > TODAY || App.diff(TODAY, day) > 60) return [];
+    var t = App.ten(), list = App.members({ initial: true }).filter(function (m) { return m.status !== "pending" && m.status !== "cancelled"; });
+    var seed = 0; (S.tenant + day).split("").forEach(function (c) { seed = (seed * 33 + c.charCodeAt(0)) % 100003; });
+    var rnd = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    if (new Date(day + "T12:00:00Z").getUTCDay() === 1) return []; // closed Mondays
+    var n = 5 + Math.floor(rnd() * 6), out = [], used = {}, base = Date.parse(day + "T00:00:00Z") + 4 * 3600000; // midnight AST
+    for (var i = 0; i < n * 3 && out.length < n; i++) {
+      var m = list[Math.floor(rnd() * list.length)]; if (used[m.id]) continue; used[m.id] = 1;
+      var inM = 8 * 60 + Math.floor(rnd() * 8 * 60), len = 35 + Math.floor(rnd() * 150), kiosk = rnd() < 0.35;
+      out.push({ vid: day + "-" + i, mid: m.id, name: m.name, lic: m.lic ? m.lic.no : "", cal: calFor(m), in: base + inM * 60000, out: base + (inM + len) * 60000, inBy: kiosk ? "kiosk" : t.staff.name, outBy: kiosk ? "kiosk" : t.staff.name, forced: false, guests: [] });
+    }
+    return out.sort(function (a, b) { return a.in - b.in; });
+  };
+  App.byLabel = function (by) { return by === "kiosk" ? tx("Quiosco", "Kiosk") : by || "—"; };
+  /* Official log export = the six Reg. 9172 fields + visit type (non-shooting guests: license/caliber "N/A (no dispara)"). full=true: full license number (regulator/inspector copy; owner only, recorded in the access log);
+     full=false: license masked to the last 4 (working copy). Audit extras (staff, forced flag) stay on screen, not in the export. */
+  App.VLOG_HEAD = { es: ["Nombre completo", "Fecha", "Número de licencia de armas", "Calibre utilizado", "Hora de entrada", "Hora de salida", "Tipo de visita"], en: ["Full name", "Date", "Gun license number", "Caliber used", "Time in", "Time out", "Visit type"] };
+  App.visitCSV = function (day, full) {
+    var rows = App.visitsFor(day).sort(function (a, b) { return a.in - b.in; });
+    var q = function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var dd = day.slice(8, 10) + "/" + day.slice(5, 7) + "/" + day.slice(0, 4);
+    var lines = [App.VLOG_HEAD[S.lang === "en" ? "en" : "es"].map(q).join(",")].concat(rows.map(function (v) {
+      var na = S.lang === "en" ? "N/A (no shooting)" : "N/A (no dispara)", comp = v.type === "companion";
+      return [v.name, dd, comp ? na : (full ? v.lic : App.mask(v.lic)), comp ? na : (v.cal || ""), App.time(v.in), v.out ? App.time(v.out) : "", App.visitType(v)].map(q).join(",");
+    }));
+    return lines.join("\r\n") + "\r\n";
+  };
+  /* client-side download (works offline and from file://) */
+  App.downloadCSV = function (name, text) {
+    var blob = new Blob(["\ufeff" + text], { type: "text/csv;charset=utf-8" }), url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = name; a.style.display = "none"; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
+  };
+  /* end-of-day banner (after closing time, or the presenter's "simulate closing") with staff force-checkout */
+  App.closeBanner = function (by) {
+    var c = App.closeState(); if (!c.on || !c.open.length) return "";
+    return '<div class="close-banner" role="alert">' + ic("alert") + '<div class="grow"><strong>' + tx("Cierre del día (" + App.hm(c.close, "es") + "): ", "Closing time (" + App.hm(c.close, "en") + "): ") + c.open.length + tx(" siguen registrados", " still signed in") + "</strong><div class=\"small\">" + tx("Registra su salida en recepción, o fuerza la salida: queda marcada en el registro como «Salida forzada por personal».", "Check them out at the desk, or force the check-out: it's flagged in the log as “Forced check-out by staff”.") + (c.sim && !c.after ? " · " + tx("cierre simulado", "simulated closing") : "") + '</div></div><button type="button" class="btn btn-danger btn-sm" data-act="forceAll">' + ic("log-out", "i-sm") + tx("Forzar salida de todos", "Force check-out all") + "</button></div>";
+  };
+  App.forceAllHandler = function (by, after) {
+    return function () {
+      var n = App.onSite().length;
+      App.modal({ render: function () { return '<div class="modal-head"><h2>' + tx("Forzar salida de " + n + " persona(s)", "Force check-out for " + n + " people") + '</h2><button type="button" class="icon-btn" data-act="closeModal" aria-label="' + tx("Cerrar", "Close") + '">' + ic("x") + '</button></div><div class="modal-body stack-2"><p>' + tx("Se registrará la hora de salida de ahora y cada visita quedará marcada como <strong>Salida forzada por personal · " + by + "</strong>.", "Now will be recorded as the time out and each visit is flagged <strong>Forced check-out by staff · " + by + "</strong>.") + '</p><div class="callout">' + ic("info") + "<span>" + tx("Úsalo solo cuando el miembro ya no está en el club (por ejemplo, olvidó registrar su salida).", "Use it only when the member has already left (e.g. forgot to check out).") + '</span></div></div><div class="modal-foot"><button type="button" class="btn btn-secondary" data-act="closeModal">' + tx("Cancelar", "Cancel") + '</button><button type="button" class="btn btn-danger" data-act="forceAllGo">' + tx("Forzar salida", "Force check-out") + "</button></div>"; } });
+      App.handlers.forceAllGo = function () { App.forceCheckoutAll(by); App.closeModal(); App.rerender(); App.toast(tx(n + " salida(s) forzada(s) · marcadas en el registro", n + " forced check-out(s) · flagged in the log")); if (after) after(); };
+    };
+  };
+
+  /* ---------- Licencia de Armas (PR weapons license) */
+  /* bands: ok (>180 d) · soon6 (31–180) · soon30 (1–30) · today · expired · suspended · revoked · none */
+  App.lic = function (m) {
+    var l = (m && m.lic) || {}, days = l.exp ? App.diff(l.exp, TODAY) : null;
+    var band = l.st === "suspended" || l.st === "revoked" ? l.st : days == null ? "none" : days < 0 ? "expired" : days === 0 ? "today" : days <= 30 ? "soon30" : days <= 180 ? "soon6" : "ok";
+    return { no: l.no || "", masked: App.mask(l.no), exp: l.exp || null, days: days, band: band, blocked: band === "expired" || band === "suspended" || band === "revoked", filed: (m && m.licFiled) || null,
+      graceEnd: l.exp ? App.addDays(l.exp, 30) : null, cancelBy: l.exp ? App.addMonths(l.exp, 6) : null };
+  };
+  App.licBadge = function (m, lg) {
+    var L = App.lic(m), cls = { ok: "active", soon6: "neutral", soon30: "grace", today: "grace", expired: "lapsed", suspended: "lapsed", revoked: "lapsed", none: "neutral" }[L.band];
+    var txt = L.band === "ok" ? tx("Licencia vigente", "License valid") : L.band === "expired" ? tx("Licencia vencida", "License expired") + " · " + tx("hace " + -L.days + " d", -L.days + " d ago") : L.band === "suspended" ? tx("Licencia suspendida", "License suspended") : L.band === "revoked" ? tx("Licencia revocada", "License revoked") : L.band === "none" ? tx("Sin licencia", "No license") : L.days === 0 ? tx("Licencia vence hoy", "License expires today") : tx("Licencia vence en " + L.days + " d", "License expires in " + L.days + " d");
+    return '<span class="badge badge--' + cls + (lg ? " badge-lg" : "") + '" data-lic="' + L.band + '">' + ic(L.band === "ok" ? "check-circle" : L.blocked ? "x-circle" : "clock") + txt + "</span>";
+  };
+  /* dashboard bands: ≤6 months (31–180 d), ≤30 days (0–30 d, incl. today), expired (in the 30-day grace or accruing fines) */
+  App.licBands = function () {
+    var cur = App.members(), ini = App.members({ initial: true }), b = App.ten().licBase;
+    var inB = function (m, k) { var x = App.lic(m).band; return k === "soon30" ? (x === "soon30" || x === "today") : x === k; };
+    var cnt = function (list, k) { return list.filter(function (m) { return inB(m, k); }).length; };
+    var out = {}; ["soon6", "soon30", "expired"].forEach(function (k) { out[k] = { n: b[k] + cnt(cur, k) - cnt(ini, k), list: cur.filter(function (m) { return inB(m, k); }).sort(function (a, c) { return App.lic(a).days - App.lic(c).days; }) }; });
+    return out;
+  };
+  /* License reminder timeline (Legal §5): anchored to the expiry date E. */
+  App.LIC_DAYS = [180, 120, 90, 60, 30, 14, 7, 0, -7, -25, -60, -120, -150];
+  App.licStepKey = function (d) { return d > 0 ? "l" + d : d === 0 ? "l0" : "lp" + -d; };
+  App.licChannels = function (m) { var c = App.settings().licCh, out = []; if (c.email) out.push("email"); if (c.push) out.push("push"); if (c.app) out.push("app"); if (c.sms && m && m.sms !== false) out.push("sms"); return out; };
+  App.licTimeline = function (m) {
+    var L = App.lic(m); if (!L.exp) return [];
+    return App.LIC_DAYS.map(function (d) {
+      var at = App.addDays(L.exp, -d), st = at < TODAY ? "sent" : at === TODAY ? "today" : "upcoming";
+      if (L.filed && at >= L.filed) st = "paused";
+      if (L.band === "suspended" || L.band === "revoked") st = at < TODAY ? "sent" : "off";
+      return { d: d, key: App.licStepKey(d), at: at, st: st };
+    });
+  };
+  App.licTimelineHTML = function (m, compact) {
+    var rows = App.licTimeline(m); if (!rows.length) return "";
+    var lab = function (d) { return d > 0 ? tx(d + " días antes", d + " days before") : d === 0 ? tx("Día de vencimiento", "Expiry day") : tx(-d + " días después", -d + " days after"); };
+    var note = function (d) { return d === 180 ? tx("Ya puede renovar", "Renewal opens") : d === 0 ? tx("Desde mañana no puede tirar", "From tomorrow: may not shoot") : d === -25 ? tx("Antes de las multas", "Before fines start") : d === -60 || d === -120 ? tx("Multa $25/mes", "$25/month fine") : d === -150 ? tx("Aviso de cancelación", "Cancellation warning") : ""; };
+    var stl = { sent: tx("Enviado", "Sent"), today: tx("Hoy", "Today"), upcoming: tx("Próximo", "Upcoming"), paused: tx("En pausa", "Paused"), off: tx("No aplica", "N/A") };
+    return '<ol class="ltl' + (compact ? " is-compact" : "") + '" data-ltl>' + rows.map(function (r) {
+      return '<li class="ltl-i is-' + r.st + (r.d === 0 ? " is-e" : "") + '" data-st="' + r.st + '"><span class="ltl-dot"></span><span class="ltl-l"><strong>' + lab(r.d) + "</strong>" + (note(r.d) ? '<span class="xs subtle"> · ' + note(r.d) + "</span>" : "") + '<span class="xs subtle ltl-date">' + App.fds(r.at) + '</span></span><span class="ltl-s">' + stl[r.st] + "</span></li>";
+    }).join("") + "</ol>";
+  };
+  App.filedToggle = function (m) { var on = !!(m && m.licFiled); return '<button type="button" class="tgl" role="switch" aria-checked="' + on + '" data-act="licFiled" data-filed="' + on + '"><span class="tgl-k"></span><span class="tgl-t">' + (on ? tx("Sí · radicada el ", "Yes · filed ") + App.fds(m.licFiled) + tx(" · avisos en pausa", " · reminders paused") : tx("No · avisos activos", "No · reminders on")) + "</span></button>"; };
+  App.setLicFiled = function (id, on) { App.update(id, { licFiled: on ? TODAY : null }); App.event({ type: "licFiled", id: id, name: (App.member(id) || {}).name, on: !!on }); };
   App.signWaiver = function (id, o) {
     App.update(id, { waiver: { v: App.ten().waiver.v, date: TODAY, lang: o.lang || "es" } });
     App.event({ type: "waiver", id: id, name: (App.member(id) || {}).name, lang: o.lang || "es", where: o.where || "tablet" });
@@ -223,12 +401,30 @@
       var ch = (step === "d30" || step === "d14") ? ["email"] : (m.sms === false ? ["email"] : ["sms", "email"]);
       msgs.push({ kind: "reminder", mid: m.id, step: step, ch: ch, noSms: m.sms === false && step !== "d30" && step !== "d14" });
     });
-    var order = { d1: 0, d0: 1, d7: 2, g3: 3, lapsed: 4, d14: 5, d30: 6 };
+    list.filter(function (m) { return m.status !== "cancelled" && m.lic && m.lic.exp; }).forEach(function (m) {
+      var L = App.lic(m), d = -L.days; if (App.LIC_DAYS.indexOf(-d) < 0 || L.band === "suspended" || L.band === "revoked") return;
+      if (L.filed) { msgs.push({ kind: "skip", mid: m.id, step: App.licStepKey(L.days), ch: [], filed: true }); return; }
+      msgs.push({ kind: "lic", mid: m.id, step: App.licStepKey(L.days), ch: App.licChannels(m), noSms: App.settings().licCh.sms && m.sms === false });
+    });
+    var order = { d1: 0, d0: 1, d7: 2, g3: 3, lapsed: 4, d14: 5, d30: 6 }; App.LIC_DAYS.forEach(function (d, i) { order[App.licStepKey(d)] = 20 - i; });
     msgs.sort(function (a, b) { return (a.kind === "skip") - (b.kind === "skip") || ((a.step in order) ? order[a.step] : 2.5) - ((b.step in order) ? order[b.step] : 2.5); });
     App.ts().outbox.run = { at: Date.now(), msgs: msgs }; save();
     return msgs;
   };
-  App.STEPN = { d30: ["30 días antes", "30 days before"], d14: ["14 días antes", "14 days before"], d7: ["7 días antes", "7 days before"], d1: ["1 día antes", "1 day before"], d0: ["Día de vencimiento", "Expiry day"], g3: ["En gracia · día 3", "Grace · day 3"], lapsed: ["Vencida", "Lapsed"] };
+  App.STEPN = { d30: ["30 días antes", "30 days before"], d14: ["14 días antes", "14 days before"], d7: ["7 días antes", "7 days before"], d1: ["1 día antes", "1 day before"], d0: ["Día de vencimiento", "Expiry day"], g3: ["En gracia · día 3", "Grace · day 3"], lapsed: ["Vencida", "Lapsed"],
+    l0: ["Licencia · día de vencimiento", "License · expiry day"] };
+  [180, 120, 90, 60, 30, 14, 7].forEach(function (d) { App.STEPN["l" + d] = ["Licencia · " + d + " días antes", "License · " + d + " days before"]; });
+  [7, 25, 60, 120, 150].forEach(function (d) { App.STEPN["lp" + d] = ["Licencia · " + d + " días después", "License · " + d + " days after"]; });
+  App.LIC_STEPS = App.LIC_DAYS.map(function (d) { return App.licStepKey(d); });
+  /* SMS length/encoding: GSM-7 = 160 chars per single segment (153 per part if longer); any other char forces UCS-2 (70 / 67). */
+  var GSM = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà", GSMX = "^{}\\[~]|€";
+  App.smsInfo = function (txt) {
+    var gsm = true, len = 0;
+    for (var i = 0; i < txt.length; i++) { var c = txt[i]; if (GSM.indexOf(c) >= 0) len++; else if (GSMX.indexOf(c) >= 0) len += 2; else { gsm = false; break; } }
+    if (!gsm) { len = txt.length; return { enc: "UCS-2", len: len, max: 70, seg: len <= 70 ? 1 : Math.ceil(len / 67) }; }
+    return { enc: "GSM-7", len: len, max: 160, seg: len <= 160 ? 1 : Math.ceil(len / 153) };
+  };
+  App.ascii = function (s) { return String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""); };
 
   /* Message templates are rendered in the MEMBER's preferred language (not the UI language). */
   App.renderMsg = function (msg) {
@@ -265,7 +461,35 @@
       body = [e("Hola " + first + ",", "Hi " + first + ","), e("Recibimos tu pago de " + App.money(tr2.price) + ". Tu membresía está activa hasta el " + App.fd(p2.expires, "es") + ".", "We received your payment of " + App.money(tr2.price) + ". Your membership is active until " + App.fd(p2.expires, "en") + ".")];
       cta = e("Ver mi tarjeta digital", "View my digital card");
     }
-    return { m: m, L: L, sms: sms, subj: subj, body: body || [], cta: cta, link: link };
+    var push = null, inapp = null;
+    if (msg.kind === "lic") {
+      /* License reminders are informational. SMS copy avoids accents (single GSM-7 segment) and gun/ammo wording (carrier SHAFT rules). */
+      var LI = App.lic(m), nd = LI.days, dl = App.fd(LI.exp, L), dA = App.ascii(dl), fA = App.ascii(first), lk = t.host + "/l", nm = App.ascii(t.name);
+      var gA = App.ascii(App.fd(LI.graceEnd, L)), cA = App.ascii(App.fd(LI.cancelBy, L)), gl = App.fd(LI.graceEnd, L), cl = App.fd(LI.cancelBy, L), ago = -nd;
+      var smsCore = nd > 0 ? e("tu licencia vence el " + dA + " (en " + nd + " dias). " + (nd === 180 ? "Ya puedes comenzar la renovacion." : "Renueva con tiempo."), "your license expires " + dA + " (in " + nd + " days). " + (nd === 180 ? "You can start renewing now." : "Renew in time."))
+        : nd === 0 ? e("tu licencia vence HOY (" + dA + "). Tienes hasta el " + gA + " para renovar sin multa.", "your license expires TODAY (" + dA + "). Renew by " + gA + " to avoid fines.")
+        : ago <= 25 ? e("tu licencia vencio el " + dA + ". Renueva antes del " + gA + " para evitar multas.", "your license expired " + dA + ". Renew by " + gA + " to avoid fines.")
+        : ago < 150 ? e("tu licencia vencio el " + dA + " y acumula multa de $25 al mes. Renueva pronto.", "your license expired " + dA + " and is accruing a $25/month fine. Renew soon.")
+        : e("tu licencia vencio el " + dA + ". Puede ser cancelada el " + cA + ". Renueva ya.", "your license expired " + dA + ". It may be cancelled on " + cA + ". Renew now.");
+      var full = nm + ": " + fA + ", " + smsCore + " " + e("Info: ", "Info: ") + lk + e(" STOP para salir", " Reply STOP to opt out");
+      var short = nm + ": " + fA + ", " + smsCore + " " + lk + " STOP";
+      sms = App.smsInfo(full).enc === "GSM-7" && App.smsInfo(full).len <= 160 ? full : short; // always one GSM-7 segment
+      subj = nd > 0 ? e("Tu licencia de armas vence el " + dl, "Your gun license expires " + dl) : nd === 0 ? e("Tu licencia de armas vence hoy", "Your gun license expires today")
+        : ago < 150 ? e("Tu licencia de armas venció el " + dl, "Your gun license expired " + dl) : e("Aviso: tu licencia de armas puede ser cancelada", "Notice: your gun license may be cancelled");
+      body = [e("Hola " + first + ",", "Hi " + first + ","),
+        nd > 0 ? e("Tu Licencia de Armas (" + LI.masked + ") vence el " + dl + ", en " + nd + " días." + (nd === 180 ? " Desde hoy puedes comenzar la renovación." : ""), "Your gun license (" + LI.masked + ") expires " + dl + ", in " + nd + " days." + (nd === 180 ? " You can start the renewal today." : ""))
+          : nd === 0 ? e("Tu Licencia de Armas (" + LI.masked + ") vence hoy. Desde mañana no podrás tirar en el club hasta renovarla. Tienes hasta el " + gl + " para renovar sin multa.", "Your gun license (" + LI.masked + ") expires today. From tomorrow you can't shoot at the range until it's renewed. You have until " + gl + " to renew without a fine.")
+          : ago <= 25 ? e("Tu Licencia de Armas (" + LI.masked + ") venció el " + dl + ". Si renuevas antes del " + gl + " no pagas multa.", "Your gun license (" + LI.masked + ") expired " + dl + ". Renew before " + gl + " and there's no fine.")
+          : ago < 150 ? e("Tu Licencia de Armas (" + LI.masked + ") venció el " + dl + ". Desde el " + gl + " se acumula una multa de $25 al mes.", "Your gun license (" + LI.masked + ") expired " + dl + ". Since " + gl + " a $25/month fine is accruing.")
+          : e("Tu Licencia de Armas (" + LI.masked + ") venció el " + dl + ". Si no la renuevas, puede ser cancelada a partir del " + cl + ".", "Your gun license (" + LI.masked + ") expired " + dl + ". If it isn't renewed it may be cancelled from " + cl + "."),
+        e("Si ya radicaste la renovación, márcalo en tu portal («Renovación radicada») y pausamos estos avisos.", "If you already filed the renewal, mark it in your portal (“Renewal filed”) and we'll pause these notices."),
+        e("Aviso informativo de " + t.name + ". La renovación la tramitas tú ante la Policía de Puerto Rico.", "Informational notice from " + t.name + ". You renew the license yourself with the Puerto Rico Police.")];
+      cta = e("Ver mi licencia", "View my license"); link = lk;
+      push = { title: nd > 0 ? e("Licencia: vence en " + nd + " días", "License: expires in " + nd + " days") : nd === 0 ? e("Licencia: vence hoy", "License: expires today") : e("Licencia vencida hace " + ago + " días", "License expired " + ago + " days ago"),
+        body: nd > 0 ? e("Vence el " + dl + ". Toca para ver tu calendario de avisos.", "Expires " + dl + ". Tap to see your reminder timeline.") : nd === 0 ? e("Renueva antes del " + gl + " para evitar multas.", "Renew by " + gl + " to avoid fines.") : ago <= 25 ? e("Renueva antes del " + gl + " para evitar multas.", "Renew by " + gl + " to avoid fines.") : ago < 150 ? e("Multa de $25 al mes desde el " + gl + ".", "$25/month fine since " + gl + ".") : e("Puede ser cancelada el " + cl + ".", "May be cancelled on " + cl + ".") };
+      inapp = { title: subj, body: body[1] };
+    }
+    return { m: m, L: L, sms: sms, subj: subj, body: body || [], cta: cta, link: link, push: push, inapp: inapp };
   };
   function tokenFor(id) { var h = 0; for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return (h.toString(36).toUpperCase() + "QX9ZK").slice(0, 6); }
 
@@ -317,7 +541,13 @@
   App.mark = function (inv) { return '<use href="#' + App.ten().mark + (inv ? "-inv" : "") + '"/>'; };
   App.qr = function (id) { return "assets/qr/" + id + ".svg"; };
   App.portrait = function (m, size) { return window.portrait(m.p || 0, size); };
-  App.powered = function () { return '<span class="powered"><svg><use href="#rc-mark"/></svg>' + tx("Con la tecnología de Range Club", "Powered by Range Club") + "</span>"; };
+  /* Endorsement: "Range Club, por Infante Automation" with the iA badge mark (badge variant at every size; fixed aspect ratio;
+     clear space = teal-dot height ≈ 12% of the mark; never recolored). Text in muted slate. */
+  App.endorse = function (size, cls) {
+    size = size || 16;
+    return '<span class="endorse' + (cls ? " " + cls : "") + '" data-endorse><img class="ia-mark" src="assets/brand/ia-mark.svg" width="' + size + '" height="' + size + '" alt="iA" style="margin:' + Math.max(2, Math.round(size * 0.125)) + 'px"><span>' + tx("Range Club, por Infante Automation", "Range Club, by Infante Automation") + "</span></span>";
+  };
+  App.powered = function () { return '<span class="powered"><svg><use href="#rc-mark"/></svg>' + tx("Con la tecnología de Range Club", "Powered by Range Club") + "</span>" + '<div class="endorse-row">' + App.endorse(16) + "</div>"; };
 
   App.toast = function (msg, kind) {
     var el = document.createElement("div"); el.className = "toast" + (kind ? " " + kind : ""); el.setAttribute("role", "status");
@@ -340,14 +570,15 @@
 
   /* ------------------------------------------------------------ demo steps (presenter path; mirrors the spec's demo script) */
   App.STEPS = [
-    { n: 1, page: "signup", href: "signup.html", t: ["Inscripción desde el teléfono", "Sign-up on a phone"], d: ["Un miembro nuevo elige plan, valida 21+, firma el relevo bilingüe y acepta textos.", "A new member picks a plan, passes the 21+ check, signs the bilingual waiver and opts in to texts."] },
-    { n: 2, page: "outbox", href: "dashboard.html", t: ["Recordatorios de hoy", "Today's reminders"], d: ["Desde el panel, el dueño ejecuta los recordatorios; la bandeja de demo muestra el texto y el email en español con el enlace.", "From the dashboard the owner runs today's reminders; the demo outbox shows the Spanish text and email with the one-click link."] },
+    { n: 1, page: "signup", href: "signup.html", t: ["Inscripción desde el teléfono", "Sign-up on a phone"], d: ["Un miembro nuevo elige plan, valida 21+, registra su licencia de armas, firma el relevo bilingüe y acepta textos. Todo viene lleno: solo toca.", "A new member picks a plan, passes the 21+ check, adds their gun license, signs the bilingual waiver and opts in to texts. Everything is prefilled: just tap."] },
+    { n: 2, page: "outbox", href: "dashboard.html", t: ["Recordatorios de hoy", "Today's reminders"], d: ["El dueño ejecuta los recordatorios: renovaciones por texto y email; licencias de armas por email, push y en la app (SMS solo si el club lo activa).", "The owner runs today's reminders: renewals by text and email; gun licenses by email, push and in-app (SMS only if the range turns it on)."] },
     { n: 3, page: "renew", href: "renew.html", t: ["Renovación en un clic", "One-click renewal"], d: ["El miembro toca el enlace y renueva con PayPal, tarjeta o ATH Móvil, sin iniciar sesión.", "The member taps the link and renews with PayPal, card or ATH Móvil, no login."] },
     { n: 4, page: "card", href: "portal.html", t: ["Portal y tarjeta digital", "Portal & digital card"], d: ["La membresía ya está Activa; su tarjeta QR es la que se escanea en recepción.", "The membership is now Active; the QR card is what the front desk scans."] },
-    { n: 5, page: "checkin", href: "checkin.html", t: ["Recepción: escanear tarjetas", "Front desk: scan cards"], d: ["Uno pasa, uno bloqueado por membresía vencida (Renovar ahora → entra) y uno por relevo; cada solución a un toque.", "One cleared, one blocked for a lapsed membership (Renew now → checked in), one for a waiver; each fix one tap away."] },
-    { n: 6, page: "dashboard", href: "dashboard.html", t: ["Panel del dueño", "Owner dashboard"], d: ["Renovaciones por vencer, tasa, ingresos en riesgo y por origen; los números reflejan lo que acabas de hacer.", "Renewals due, rate, revenue at risk and by source; the numbers reflect what you just did."] },
-    { n: 7, page: "kiosk", href: "kiosk.html", t: ["Modo quiosco", "Kiosk mode"], d: ["Autoservicio: el miembro escanea su tarjeta y entra, o firma el relevo ahí mismo.", "Self-service: the member scans their card and checks in, or signs the waiver right there."] },
-    { n: 8, page: "salinas", href: "dashboard.html?tenant=salinas", t: ["Cambiar a Club de Tiro Salinas", "Switch to Club de Tiro Salinas"], d: ["Otra marca y otros miembros; nada de los datos de Guayama.", "Its own brand and members; none of Guayama's data."] }
+    { n: 5, page: "checkin", href: "checkin.html", t: ["Recepción: entrada y salida", "Front desk: check-in & check-out"], d: ["Uno pasa, uno vencido (Renovar ahora → entra con su calibre → registra su salida con la duración), uno con relevo viejo y uno con licencia de armas vencida: rechazo en rojo.", "One cleared, one lapsed (Renew now → in with their caliber → checks out with duration), one with an old waiver and one with an expired gun license: red refusal."] },
+    { n: 6, page: "dashboard", href: "dashboard.html", t: ["Panel del dueño", "Owner dashboard"], d: ["Quién está en las instalaciones ahora, licencias por vencer, el registro de visitas oficial con CSV y el cierre del día con salida forzada.", "Who's on site now, expiring licenses, the official visit log with CSV and end of day with forced check-out."] },
+    { n: 7, page: "settings", href: "settings.html", t: ["Licencias: avisos y canales", "Licenses: reminders & channels"], d: ["Licencia vencida, suspendida o revocada siempre bloquea. Calendario de avisos de 180 días antes a 150 después; email, push y en la app; SMS opcional y apagado.", "An expired, suspended or revoked license always blocks. Reminder timeline from 180 days before to 150 after; email, push and in-app; SMS optional and off."] },
+    { n: 8, page: "kiosk", href: "kiosk.html", t: ["Modo quiosco", "Kiosk mode"], d: ["Autoservicio: entrada y salida con la tarjeta o con teléfono + código, o firmar el relevo ahí mismo.", "Self-service: check in and out with the card or phone + code, or sign the waiver right there."] },
+    { n: 9, page: "salinas", href: "dashboard.html?tenant=salinas", t: ["Cambiar a Club de Tiro Salinas", "Switch to Club de Tiro Salinas"], d: ["Otra marca, otros miembros, visitas y licencias; nada de los datos de Guayama.", "Its own brand, members, visits and licenses; none of Guayama's data."] }
   ];
   App.stepFor = function (page) { for (var i = 0; i < App.STEPS.length; i++) if (App.STEPS[i].page === page) return App.STEPS[i]; return null; };
 
@@ -356,30 +587,33 @@
     ["dashboard", "dashboard", "Panel", "Dashboard", "dashboard.html"],
     ["checkin", "login", "Registrar entrada", "Check-in", "checkin.html"],
     ["members", "users", "Miembros", "Members", "members.html"],
+    ["visits", "history", "Registro de visitas", "Visit log", "visits.html"],
     ["outbox", "send", "Mensajes (demo)", "Messages (demo)", "outbox.html"],
     ["kiosk", "tablet", "Modo quiosco", "Kiosk mode", "kiosk.html"]
   ];
-  var NAV2 = [["layers", "Planes y precios", "Plans & pricing"], ["bell", "Recordatorios", "Reminders"], ["settings", "Ajustes del club", "Range settings"]];
+  var NAV2 = [["layers", "Planes y precios", "Plans & pricing"]];
+  var NAV3 = [["reminders", "bell", "Recordatorios", "Reminders", "settings.html#recordatorios"], ["settings", "settings", "Ajustes del club", "Range settings", "settings.html"]];
   App.staffShell = function (active, inner) {
     var t = App.ten();
     var nav = NAV.map(function (n) {
       return '<a class="nav-item' + (n[0] === active ? " is-active" : "") + '" href="' + n[4] + '"' + (n[0] === active ? ' aria-current="page"' : "") + ">" + ic(n[1]) + "<span>" + tx(n[2], n[3]) + "</span></a>";
     }).join("");
+    var nav3 = NAV3.map(function (n) { return '<a class="nav-item' + (n[0] === active ? " is-active" : "") + '" href="' + n[4] + '">' + ic(n[1]) + "<span>" + tx(n[2], n[3]) + "</span></a>"; }).join("");
     var nav2 = NAV2.map(function (n) { return '<span class="nav-item is-disabled" title="' + tx("Fuera del alcance de esta demo", "Not part of this demo") + '">' + ic(n[0]) + "<span>" + tx(n[1], n[2]) + '</span><span class="nav-off">' + tx("demo", "demo") + "</span></span>"; }).join("");
     return '<div class="app">' +
       '<aside class="sidebar" id="sidebar"><div class="sidebar-inner">' +
       '<a class="rc-logo" href="index.html"><svg><use href="#rc-mark"/></svg><span>Range Club</span></a>' +
       '<button type="button" class="tenant-switch" data-act="tenantMenu" aria-haspopup="true"><svg class="tenant-mark">' + App.mark() + '</svg><div class="grow"><div class="t-name">' + t.name + '</div><div class="t-sub">' + t.host + "</div></div>" + ic("chev-up-down", "i-sm subtle") + "</button>" +
-      '<nav class="nav" aria-label="' + tx("Principal", "Main") + '"><div class="nav-label">' + tx("Operación", "Operations") + "</div>" + nav + '<div class="nav-label">' + tx("Configuración", "Setup") + "</div>" + nav2 + "</nav>" +
+      '<nav class="nav" aria-label="' + tx("Principal", "Main") + '"><div class="nav-label">' + tx("Operación", "Operations") + "</div>" + nav + '<div class="nav-label">' + tx("Configuración", "Setup") + "</div>" + nav2 + nav3 + "</nav>" +
       '<div class="sidebar-foot"><div class="staff-chip"><div class="avatar avatar-sm av-1">' + t.owner.ini + '</div><div class="grow" style="line-height:16px"><div style="font-weight:600;font-size:13px">' + t.owner.name + '</div><div class="xs subtle">' + tx("Dueño/a", "Owner") + "</div></div></div></div>" +
       "</div></aside>" +
       '<div class="sidebar-scrim" data-act="navClose"></div>' +
       '<main class="main"><header class="topbar">' +
       '<button type="button" class="icon-btn nav-toggle" data-act="navOpen" aria-label="' + tx("Menú", "Menu") + '">' + ic("more") + "</button>" +
-      '<form class="search input-wrap" action="members.html" role="search">' + ic("search", "i-sm") + '<input class="input" name="q" placeholder="' + tx("Buscar miembros, # o teléfono…", "Search members, # or phone…") + '" aria-label="' + tx("Buscar miembros", "Search members") + '"></form>' +
+      '<form class="search input-wrap" action="members.html" role="search">' + ic("search", "i-sm") + '<input class="input" name="q" value="' + App.esc(t.demo.desk) + '" placeholder="' + tx("Buscar miembros, # o teléfono…", "Search members, # or phone…") + '" aria-label="' + tx("Buscar miembros", "Search members") + '"></form>' +
       '<span class="grow"></span>' + App.langSeg() +
       '<a class="btn btn-primary topbar-cta" href="checkin.html">' + ic("login", "i-sm") + "<span>" + tx("Registrar entrada", "Check in") + "</span></a>" +
-      '</header><div class="content">' + inner + "</div></main></div>";
+      '</header><div class="content">' + inner + '<footer class="app-foot">' + App.endorse(16) + "</footer></div></main></div>";
   };
 
   /* ------------------------------------------------------------ member (mobile) shell with desktop device frame + presenter guide */
@@ -394,6 +628,7 @@
       '<div class="g-meta"><div class="row"><svg class="tenant-mark" style="width:28px;height:28px">' + App.mark() + '</svg><div><div style="font-weight:600">' + t.name + '</div><div class="xs subtle">' + tx("Vista del miembro · teléfono", "Member view · phone") + "</div></div></div></div>" +
       (nextStep ? '<a class="btn btn-secondary btn-block" href="' + nextStep.href + '">' + tx("Siguiente: ", "Next: ") + App.txa(nextStep.t) + ic("arrow-right", "i-sm") + "</a>" : "") +
       '<a class="btn btn-ghost btn-block" href="index.html">' + ic("arrow-left", "i-sm") + tx("Ruta de la demo", "Demo path") + "</a>" +
+      '<div class="g-endorse">' + App.endorse(16) + "</div>" +
       "</aside>";
     return '<div class="stage">' + guide + '<div class="device"><div class="device-screen" id="screen">' + head + o.content + "</div></div></div>";
   };
@@ -467,15 +702,43 @@
     if (el.tagName === "A" || el.tagName === "BUTTON") e.preventDefault();
     h(el, e);
   });
+  document.addEventListener("input", function (e) {
+    var k = e.target && e.target.dataset && e.target.dataset.pay, c = App.payCtx; if (!k || !c) return;
+    if (["holder", "num", "exp", "cvv", "zip"].indexOf(k) >= 0) { c.card = c.card || {}; c.card[k] = e.target.value; } else c[k] = e.target.value;
+  });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && App.modalDef && !App.modalDef.sticky) App.closeModal(); });
 
   /* ------------------------------------------------------------ payment pieces (renewal, sign-up, front desk) */
-  App.payPicker = function (vm) {
+  /* Payment inputs are prefilled with the club's sandbox data and stay editable (typing updates the live state). */
+  App.payDefaults = function (vm, who) {
+    var d = App.ten().demo; who = who || {};
+    if (!vm.card) vm.card = { holder: who.name || "", num: d.card.num, exp: d.card.exp, cvv: d.card.cvv, zip: App.ten().zip };
+    if (vm.athPhone == null) vm.athPhone = who.phone || "";
+    if (vm.ppEmail == null) vm.ppEmail = who.email || "";
+  };
+  App.payCheck = function (vm) {
+    if (vm.method === "card") {
+      var c = vm.card || {};
+      if (!String(c.holder || "").trim()) return tx("Escribe el nombre en la tarjeta.", "Enter the cardholder name.");
+      if (!/^\d{15,16}$/.test(String(c.num || "").replace(/\D/g, ""))) return tx("Número de tarjeta no válido.", "Invalid card number.");
+      if (!/^\d{2}\s*\/\s*\d{2}$/.test(String(c.exp || "").trim())) return tx("Vencimiento: usa MM / AA.", "Expiry: use MM / YY.");
+      if (!/^\d{3,4}$/.test(String(c.cvv || "").trim())) return tx("CVV de 3 o 4 dígitos.", "3- or 4-digit CVV.");
+      if (!/^\d{5}$/.test(String(c.zip || "").trim())) return tx("Código postal de 5 dígitos.", "5-digit ZIP code.");
+    }
+    if (vm.method === "ath" && String(vm.athPhone || "").replace(/\D/g, "").length !== 10) return tx("Escribe el móvil de ATH Móvil (10 dígitos).", "Enter the ATH Móvil mobile number (10 digits).");
+    return null;
+  };
+  App.payPicker = function (vm, who) {
+    App.payDefaults(vm, who); App.payCtx = vm;
+    var pin = function (k, label, val, attrs) { return '<label class="pf"><span class="pf-l">' + label + '</span><input class="input" data-pay="' + k + '" value="' + App.esc(val) + '"' + (attrs || "") + "></label>"; };
     var opt = function (k, inner) { return '<button type="button" class="pay-opt' + (vm.method === k ? " is-selected" : "") + '" data-act="payMethod" data-v="' + k + '" aria-pressed="' + (vm.method === k) + '">' + (vm.method === k ? '<span class="sel">' + ic("check") + "</span>" : "") + inner + "</button>"; };
     var html = '<div class="pay-opts">' + opt("paypal", '<span class="wm wm-paypal">Pay<b>Pal</b></span><span>PayPal</span>') + opt("card", ic("card", "i-lg") + "<span>" + tx("Tarjeta", "Card") + "</span>") + opt("ath", '<span class="wm wm-ath">ATH</span><span>ATH Móvil</span>') + "</div>";
-    if (vm.method === "card") html += '<div class="hosted"><div class="hosted-label">' + ic("lock") + tx("Campos seguros de PayPal · nunca vemos tu tarjeta", "PayPal secure fields · we never see your card") + '</div><input class="input" value="4242 4242 4242 4242" aria-label="' + tx("Número de tarjeta", "Card number") + '" readonly><div class="row" style="gap:10px"><input class="input" value="09 / 29" aria-label="' + tx("Vencimiento", "Expiry") + '" readonly><input class="input" value="•••" aria-label="CVV" readonly><input class="input" value="' + App.ten().zip + '" aria-label="' + tx("Código postal", "ZIP code") + '" readonly></div><div class="xs subtle">' + tx("Tarjeta de prueba (sandbox): no se cobra dinero real.", "Sandbox test card: no real money is charged.") + "</div></div>";
+    if (vm.method === "card") html += '<div class="hosted"><div class="hosted-label">' + ic("lock") + tx("Campos seguros de PayPal · nunca vemos tu tarjeta", "PayPal secure fields · we never see your card") + "</div>" +
+      pin("holder", tx("Nombre en la tarjeta", "Cardholder name"), vm.card.holder, ' autocomplete="cc-name"') + pin("num", tx("Número de tarjeta", "Card number"), vm.card.num, ' inputmode="numeric" autocomplete="cc-number"') +
+      '<div class="pf-row">' + pin("exp", tx("Vence", "Expiry"), vm.card.exp, ' inputmode="numeric" autocomplete="cc-exp" placeholder="MM / AA"') + pin("cvv", "CVV", vm.card.cvv, ' inputmode="numeric" maxlength="4" autocomplete="cc-csc"') + pin("zip", tx("Código postal", "ZIP"), vm.card.zip, ' inputmode="numeric" maxlength="5" autocomplete="postal-code"') + "</div>" +
+      '<div class="xs subtle">' + tx("Tarjeta de prueba (sandbox) ya escrita: no se cobra dinero real.", "Sandbox test card already filled in: no real money is charged.") + "</div></div>";
     if (vm.method === "paypal") html += '<div class="callout">' + ic("info") + "<span>" + tx("Te llevaremos a PayPal para aprobar el pago y volverás aquí. (Sandbox: sin dinero real.)", "We'll take you to PayPal to approve and bring you back. (Sandbox: no real money.)") + "</span></div>";
-    if (vm.method === "ath") html += '<div class="callout">' + ic("phone") + "<span>" + tx("Te enviaremos una solicitud de pago a ATH Móvil al ", "We'll send a payment request to ATH Móvil at ") + "<strong>" + App.mask(vm.phone || "(787) 555-0142") + "</strong>. " + tx("Tienes hasta 10 minutos para aprobarla.", "You have up to 10 minutes to approve it.") + "</span></div>";
+    if (vm.method === "ath") html += '<div class="hosted">' + pin("athPhone", tx("Móvil registrado en ATH Móvil", "Mobile number registered with ATH Móvil"), vm.athPhone, ' inputmode="tel" autocomplete="tel"') + '<div class="xs subtle row" style="gap:6px;align-items:flex-start">' + ic("phone", "i-xs") + "<span>" + tx("Te enviaremos una solicitud de pago a este número. Tienes hasta 10 minutos para aprobarla.", "We'll send a payment request to this number. You have up to 10 minutes to approve it.") + "</span></div></div>";
     var locked = vm.method === "ath";
     html += '<div class="optin' + (locked ? " is-locked" : "") + '"><button type="button" class="toggle' + (vm.autorenew && !locked ? " is-on" : "") + (locked ? " is-locked" : "") + '" data-act="autorenew" role="switch" aria-checked="' + (!!vm.autorenew && !locked) + '" ' + (locked ? 'aria-disabled="true"' : "") + ' aria-label="' + tx("Auto-renovación", "Auto-renew") + '"></button><div><div class="optin-title">' + tx("Activar auto-renovación (opcional)", "Turn on auto-renew (optional)") + '</div><div class="optin-text">' +
       (locked ? ic("lock", "i-xs") + " " + tx("ATH Móvil no permite pagos recurrentes. Elige PayPal o tarjeta para activar la auto-renovación.", "ATH Móvil doesn't support recurring payments. Choose PayPal or card to turn on auto-renew.")
@@ -493,7 +756,7 @@
     if (vm.method === "paypal") {
       App.modal({ sticky: true, render: function () {
         return '<div class="pp-sheet"><div class="pp-top"><span class="wm wm-paypal" style="font-size:22px">Pay<b>Pal</b></span><span class="badge badge--neutral">Sandbox</span></div>' +
-          '<div class="pp-body"><div class="small muted">' + tx("Pagar a", "Pay to") + "</div><div style=\"font-weight:700;font-size:17px\">" + App.ten().name + '</div><div class="pp-amt">' + App.money(amount) + ' USD</div><div class="kv"><span class="k">' + tx("Cuenta", "Account") + '</span><span class="v">' + App.esc(who.email) + '</span></div><div class="kv"><span class="k">' + tx("Fuente", "Funding") + '</span><span class="v">' + tx("Saldo de PayPal (prueba)", "PayPal balance (test)") + "</span></div>" +
+          '<div class="pp-body"><div class="small muted">' + tx("Pagar a", "Pay to") + "</div><div style=\"font-weight:700;font-size:17px\">" + App.ten().name + '</div><div class="pp-amt">' + App.money(amount) + ' USD</div><label class="pf" style="margin:10px 0 4px"><span class="pf-l">' + tx("Email de PayPal", "PayPal email") + '</span><input class="input" data-pay="ppEmail" value="' + App.esc(vm.ppEmail != null ? vm.ppEmail : who.email) + '" inputmode="email" autocomplete="email"></label><div class="kv"><span class="k">' + tx("Fuente", "Funding") + '</span><span class="v">' + tx("Saldo de PayPal (prueba)", "PayPal balance (test)") + "</span></div>" +
           '<button type="button" class="btn btn-xl btn-block pp-btn" data-act="ppApprove">' + tx("Aceptar y pagar", "Agree & pay") + '</button><button type="button" class="btn btn-ghost btn-block" data-act="ppCancel">' + tx("Cancelar y volver", "Cancel and return") + "</button>" +
           '<div class="xs subtle" style="text-align:center">' + tx("Simulación de PayPal sandbox: no se mueve dinero real.", "Simulated PayPal sandbox: no real money moves.") + "</div></div></div>";
       } });
@@ -540,6 +803,34 @@
     if (lang === "en") return [["1. Risks of the activity", "I understand that sport shooting carries inherent risks, including serious injury, hearing or vision loss, and property damage, even when all rules are followed."], ["2. Safety rules", "I agree to follow the instructions of the range safety officer (RSO), wear eye and ear protection at all times, and keep the firearm pointed in a safe direction."], ["3. Release of liability", "To the extent permitted by Puerto Rico law, I release " + n + ", its owners, employees and volunteers from claims for injury or damage arising from my use of the facilities."], ["4. Age and eligibility", "I confirm that I am 21 years of age or older and legally allowed to possess and use firearms."], ["5. Records", "I understand that the range keeps the exact version and text I sign, the language, the date and time, and my device information."]];
     return [["1. Riesgos de la actividad", "Entiendo que el tiro deportivo conlleva riesgos inherentes, incluyendo lesiones graves, pérdida auditiva o visual, y daños a la propiedad, aun cuando se sigan todas las reglas."], ["2. Reglas de seguridad", "Me comprometo a seguir las instrucciones del oficial de seguridad (RSO), usar protección de ojos y oídos en todo momento y mantener el arma apuntando en dirección segura."], ["3. Relevo de responsabilidad", "En la medida permitida por la ley de Puerto Rico, libero a " + n + ", sus dueños, empleados y voluntarios de reclamaciones por lesiones o daños que surjan de mi uso de las instalaciones."], ["4. Edad y elegibilidad", "Confirmo que tengo 21 años o más y que la ley me permite poseer y usar armas de fuego."], ["5. Registro", "Entiendo que el club guarda la versión y el texto exacto que firmo, el idioma, la fecha y hora, y la información de mi dispositivo."]];
   };
+  /* One-tap signature: draws a handwriting-like stroke (seeded by the name) into the pad, animated. */
+  App.sigTapBtn = function () { return '<button type="button" class="sig-tap" data-act="sigTap">' + ic("pen", "i-sm") + "<span>" + tx("Toca para firmar", "Tap to sign") + "<small>" + tx("o dibuja tu firma con el dedo", "or draw it with your finger") + "</small></span></button>"; };
+  App.autoSign = function (canvas, name, done) {
+    var r = canvas.getBoundingClientRect(), w = r.width, h = r.height, ctx = canvas.getContext("2d");
+    var seed = 7; String(name || "x").split("").forEach(function (ch) { seed = (seed * 31 + ch.charCodeAt(0)) % 9973; });
+    var rnd = function () { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
+    var words = String(name || "Firma").trim().split(/\s+/).slice(0, 2), strokes = [];
+    var letters = words.reduce(function (a, wd) { return a + Math.min(wd.length, 6) + 1.6; }, 0), lw = (w * 0.74) / letters, x = w * 0.09, base = h * 0.66, tall = /[bdfhklt]/i;
+    words.forEach(function (wd) {
+      var pts = [], chars = wd.slice(0, 6).split("");
+      chars.forEach(function (ch, i) {
+        var cap = i === 0, ht = cap ? h * 0.5 : (tall.test(ch) ? h * 0.36 : h * 0.17) * (0.85 + rnd() * 0.3), a = (cap ? lw * 1.5 : lw) / (Math.PI * 2), b = a * (cap ? 1.9 : 1.55);
+        for (var k = 0; k <= 22; k++) { var t = (k / 22) * Math.PI * 2; pts.push([x + a * t - b * Math.sin(t), base - ht * (1 - Math.cos(t)) / 2 + (rnd() - 0.5) * 1.2]); }
+        x += a * Math.PI * 2;
+      });
+      strokes.push(pts); x += lw * 0.6;
+    });
+    var u = [], x0 = w * 0.12, x1 = Math.min(x, w * 0.9);
+    for (var k = 0; k <= 20; k++) { var f = k / 20; u.push([x1 - (x1 - x0) * f, base + h * 0.1 + Math.sin(f * Math.PI) * h * 0.05]); }
+    strokes.push(u);
+    var segs = []; strokes.forEach(function (st) { for (var i = 1; i < st.length; i++) segs.push([st[i - 1], st[i]]); });
+    var len = 0, i = 0, per = Math.max(1, Math.ceil(segs.length / 24));
+    ctx.lineWidth = 2.6; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#121826";
+    (function frame() {
+      for (var n = 0; n < per && i < segs.length; n++, i++) { var s = segs[i]; ctx.beginPath(); ctx.moveTo(s[0][0], s[0][1]); ctx.lineTo(s[1][0], s[1][1]); ctx.stroke(); len += Math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]); }
+      if (i < segs.length) requestAnimationFrame(frame); else done({ url: canvas.toDataURL("image/png"), len: len, auto: true });
+    })();
+  };
   App.initSig = function (canvas, initial, onChange) {
     if (!canvas) return;
     var ctx = canvas.getContext("2d"), dpr = window.devicePixelRatio || 1, drawing = false, last = null, len = (initial && initial.len) || 0;
@@ -547,7 +838,7 @@
     size();
     if (initial && initial.url) { var img = new Image(); img.onload = function () { var r = canvas.getBoundingClientRect(); ctx.drawImage(img, 0, 0, r.width, r.height); }; img.src = initial.url; }
     function pos(e) { var r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
-    canvas.addEventListener("pointerdown", function (e) { drawing = true; last = pos(e); canvas.setPointerCapture(e.pointerId); e.preventDefault(); });
+    canvas.addEventListener("pointerdown", function (e) { var tb = canvas.parentNode.querySelector(".sig-tap"); if (tb) tb.remove(); drawing = true; last = pos(e); canvas.setPointerCapture(e.pointerId); e.preventDefault(); });
     canvas.addEventListener("pointermove", function (e) { if (!drawing) return; var p = pos(e); ctx.beginPath(); ctx.moveTo(last[0], last[1]); ctx.lineTo(p[0], p[1]); ctx.stroke(); len += Math.hypot(p[0] - last[0], p[1] - last[1]); last = p; e.preventDefault(); });
     function end() { if (!drawing) return; drawing = false; onChange({ url: canvas.toDataURL("image/png"), len: len }); }
     canvas.addEventListener("pointerup", end); canvas.addEventListener("pointercancel", end); canvas.addEventListener("pointerleave", end);
